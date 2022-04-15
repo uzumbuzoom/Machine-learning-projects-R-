@@ -1,0 +1,478 @@
+---
+title: "Edyta Pszczolkowska (ID 435022) - Clustering using kmeans and CLARA"
+output:
+  html_document:
+    df_print: paged
+---
+
+The dataset contains data about customers of a food store which sells in stationary shops and also via internet and catalog.
+I will perform 2 different algorithms on the dataset: kmeans, CLARA.
+Such a method can be used for customers segmentation - based on characteristics of customers in particular clusters, we can
+summarize their traits and adjust the offer to their needs and expectations.
+
+
+The dataset contains of following variables:
+
+
+"Income"
+"Last_purchase"
+"MntWines"  - amount spent on  wine,
+"MntFruits"  -  amount spent on fruits,
+"MntMeatProducts" - amount spent on meat,
+"MntFishProducts"  -   amount spent on fish products,
+"MntSweetProducts"  -      amount spent on sweets,
+"Purchases_with_discount",
+"NumWebPurchases",
+"NumCatalogPurchases",
+"NumStorePurchases",
+"NumWebVisitsMonth",
+"Complain"      - binary variable,
+"age",
+"partner"   - binary variable,
+"kids together"
+
+
+
+
+
+
+```{r}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r}
+
+# LOADING DATA AND NECESSARY PACKAGES
+
+data <- read.csv("marketing_data.csv")
+
+
+# install.packages("factoextra")
+# install.packages("flexclust")
+# install.packages("fpc")
+# install.packages("clustertend")
+# install.packages("cluster")
+# install.packages("ClusterR")
+# install.packages("pdp")
+library(factoextra)
+library(flexclust)
+library(fpc)
+library(clustertend)
+library(cluster)
+library(ClusterR)
+library(pdp)
+
+```
+
+
+
+```{r}
+#Data preparation
+
+#deleting columns I don't need
+
+data$AcceptedCmp1 <- NULL
+data$AcceptedCmp2 <- NULL
+data$AcceptedCmp3 <- NULL
+data$AcceptedCmp4 <- NULL
+data$AcceptedCmp5 <- NULL
+data$MntGoldProds <- NULL
+data$Response <- NULL
+data$Dt_Customer <- NULL
+data$Country <- NULL
+
+
+
+
+
+#renaming columns
+colnames(data)[1] <- "ID"
+colnames(data)[colnames(data) == "Recency"] <- "Last_purchase"
+colnames(data)[colnames(data) == "NumDealsPurchases"] <- "Purchases_with_discount"
+
+
+
+
+
+#Instead of birth year I prefer age
+
+data$age <- 2021 - data$Year_Birth 
+
+data$Year_Birth <- NULL
+
+table(data$age)
+
+# customers aged 121, 122, 128 - doesn't look like reliable data :(
+
+data <- data[!(data$age=="121" | data$age=="122" | data$age=="128"), ]
+
+
+
+
+
+table(data$Education)
+
+#As it is impossible to know what the creator of the dataset meant by those values, the column will be deleted to not introduce misleading info
+
+data$Education <- NULL
+
+
+
+
+
+table(data$Marital_Status)
+
+#let's divide customers into two groups - in relationship (married, together) noted by "1"  and other noted by "0"
+
+data$partner <- ifelse(data$Marital_Status == "Married" | data$Marital_Status == "Together", 1, 0) 
+
+data$Marital_Status <- NULL
+
+
+
+
+
+
+#converting variable "INCOME" to numeric
+data$Income <- substr(data$Income, 2, nchar(data$Income))
+
+data$Income <-   sapply(data$Income, function(v) {as.numeric(gsub("\\,","", (v)))})
+
+class(data$Income)
+
+summary(data$Income)
+
+data <- na.omit(data)
+
+#serious outlier in income
+
+data <- data[!(data$Income == "666666"), ]
+
+
+
+
+#rearranging columns - I prefer number of children overall rather than with division for teens and younger
+
+data$kidstogether <- data$Kidhome + data$Teenhome
+
+data$Kidhome <- NULL
+data$Teenhome <- NULL
+
+
+```
+
+```{r}
+
+##################################################################################
+#Let's play a game...
+
+
+cluster <- data[2:17]
+
+#Scaling data - we have different variables
+
+cluster_z <- as.data.frame(lapply(cluster, scale))
+
+# Compute Hopkins statistic for data
+get_clust_tendency(cluster_z, 2, graph= FALSE)
+
+
+# If the value of Hopkins statistic is close to 1, then we can reject the null hypothesis and conclude 
+#that the dataset D is significantly a clusterable data. The obtained value = 0,8799 - good news.
+
+
+# Plotting the Ordered Dissimilarity Matrix helps also to judge whether dataset is clusterable.
+# We can assess it visually based on the graph - when blocks of colors are visible the dataset is good for clustering.
+
+di<-dist(cluster_z, method="euclidean")
+fviz_dist(di, show_labels = FALSE)+ labs(title="our data")
+
+
+```
+
+
+```{r}
+
+# CHECKING PROPER NUMBER OF CLUSTERS BASED ON SILHOUETTE INDEX
+
+
+
+
+a <- fviz_nbclust(cluster_z, FUNcluster = kmeans, method = "silhouette") + theme_classic() + ggtitle("optimal numbers of clusters - kmeans")
+b <- fviz_nbclust(cluster_z, FUNcluster = cluster::clara, method = "silhouette") + theme_classic() + ggtitle("optimal numbers of clusters - CLARA")
+
+
+grid.arrange(a,b,  ncol=1)
+
+
+#For all three methods we can see that the best would be two number of clusters. Nevertheless in my analysis I will perform codes for 3 and 4 clusters, 
+#because the dataset is too big and complex.
+
+
+#Let's see other methods based on 2 different criterion: variance explained and AIC:
+
+install.packages("ClusterR")
+library(ClusterR)
+
+opt2<-Optimal_Clusters_KMeans(cluster_z, max_clusters=10, plot_clusters = TRUE)
+
+opt3<-Optimal_Clusters_KMeans(cluster_z, max_clusters=10, plot_clusters=TRUE, criterion="AIC")
+
+#2 clusters would be the best option, but as said before: the size and complexity of the dataset is not proper for such a small division.
+
+
+
+```
+
+
+```{r}
+
+#PROPER CLUSTERING  KMEANS
+
+##########################################
+
+#Lets see 3 clusters
+
+
+KMEANS_3 <- kmeans(cluster_z, 3)
+
+
+fviz_cluster(list(data=cluster_z, cluster=KMEANS_3$cluster), 
+             ellipse.type="norm", geom="point", stand=FALSE, palette="jco", ggtheme=theme_classic())
+
+
+
+sil<-silhouette(KMEANS_3$cluster, dist(cluster_z))
+fviz_silhouette(sil)
+
+#value close to 1 implies that the instance is close to its cluster is a part of the right cluster
+#value close to -1 means that the value is assigned to the wrong cluster
+#value close to 0 implies that the sample is on or very close to the decision boundary between two
+#neighboring clusters
+#So the elements in the 1st cluster with average silhouette 0,32 are the best fitted group.
+
+
+#what knowlegde can we derive from the clusters?
+
+#Individual observations assigned to cluster
+KMEANS_3$cluster
+#Size of all 3 clusters
+KMEANS_3$size
+#Centetrs of all clusters (means)
+KMEANS_3$centers
+
+
+
+#Let's see the average values of all variables in dataset for all 3 clusters:
+
+aggregate(data = data, Income ~ KMEANS_3$cluster, mean)
+aggregate(data = data, Last_purchase ~ KMEANS_3$cluster, mean)
+aggregate(data = data, MntWines ~ KMEANS_3$cluster, mean)
+aggregate(data = data, MntFruits ~ KMEANS_3$cluster, mean)
+aggregate(data = data, MntMeatProducts ~ KMEANS_3$cluster, mean)
+aggregate(data = data, MntFishProducts ~ KMEANS_3$cluster, mean)
+aggregate(data = data, MntSweetProducts ~ KMEANS_3$cluster, mean)
+aggregate(data = data, Purchases_with_discount ~ KMEANS_3$cluster, mean)
+aggregate(data = data, NumWebPurchases ~ KMEANS_3$cluster, mean)
+aggregate(data = data, NumCatalogPurchases ~ KMEANS_3$cluster, mean)
+aggregate(data = data, NumStorePurchases ~ KMEANS_3$cluster, mean)
+aggregate(data = data, NumWebVisitsMonth ~ KMEANS_3$cluster, mean)
+aggregate(data = data, Complain ~ KMEANS_3$cluster, mean)
+aggregate(data = data, age ~ KMEANS_3$cluster, mean)
+aggregate(data = data, partner ~ KMEANS_3$cluster, mean)
+aggregate(data = data, kidstogether ~ KMEANS_3$cluster, mean)
+
+
+
+#Together with the boxplot below it can give us a good insight 
+#of the avarage characteriscits of observations in a particular cluster.
+
+
+
+groupBWplot(cluster_z, KMEANS_3$cluster, alpha=0.05)
+
+
+#So we may describe typical customer from a 1st cluster as follows:
+#- much less income and expenditures compared with customers from 2 other clusters
+#- very seldom purchases via catalog and browses web page the most
+#- complains the most
+
+
+
+#So we may describe typical customer from a 2nd cluster as follows:
+#- medium income and expenditures compared with customers from 2 other clusters
+#- uses discounts the most (ca. 3 times more than others) and purchases via internet the most
+#- is the oldest but not much more than representative from other clusters
+
+
+
+#So we may describe typical customer from a 3rd cluster as follows:
+#- the wealthiest of all 3 clusters (75521,61$ of income)
+#- buys the most or/and buys the most expensive products
+#- uses less discounts compared to other clusters but buys via catalog and in stores the most
+#- on average has 1 less child than others
+
+#So on the basis of analysis below we may already arrive to some conclusions: 
+#the most "precious" is group in cluster 3, as they usually don't have children and like buiyng via catalog we may adjust our offer for wealthy #childless people.  
+#For the least wealthy group with more children, we can offer lower-price products in bigger packages for the while family.
+#It is also worth to focus what they complain the most.
+#for the 2nd group it is worth to consider enhancing the offer of online shop and discounts as this is what the most take advantage of.
+
+
+
+##########################################
+
+
+
+```
+
+
+
+
+```{r}
+
+#Lets see 4 clusters
+
+
+KMEANS_4 <- kmeans(cluster_z, 4)
+
+
+fviz_cluster(list(data=cluster_z, cluster=KMEANS_4$cluster), 
+             ellipse.type="norm", geom="point", stand=FALSE, palette="jco", ggtheme=theme_classic())
+
+
+
+
+sil<-silhouette(KMEANS_4$cluster, dist(cluster_z))
+fviz_silhouette(sil)
+
+#slightly worse than with 3 clusters, we could see actually the plot of silhouette for differetn number of clusters before.
+
+
+aggregate(data = data, Income ~ KMEANS_4$cluster, mean)
+aggregate(data = data, Last_purchase ~ KMEANS_4$cluster, mean)
+aggregate(data = data, MntWines ~ KMEANS_4$cluster, mean)
+aggregate(data = data, MntFruits ~ KMEANS_4$cluster, mean)
+aggregate(data = data, MntMeatProducts ~ KMEANS_4$cluster, mean)
+aggregate(data = data, MntFishProducts ~ KMEANS_4$cluster, mean)
+aggregate(data = data, MntSweetProducts ~ KMEANS_4$cluster, mean)
+aggregate(data = data, Purchases_with_discount ~ KMEANS_4$cluster, mean)
+aggregate(data = data, NumWebPurchases ~ KMEANS_4$cluster, mean)
+aggregate(data = data, NumCatalogPurchases ~ KMEANS_4$cluster, mean)
+aggregate(data = data, NumStorePurchases ~ KMEANS_4$cluster, mean)
+aggregate(data = data, NumWebVisitsMonth ~ KMEANS_4$cluster, mean)
+aggregate(data = data, Complain ~ KMEANS_4$cluster, mean)
+aggregate(data = data, age ~ KMEANS_4$cluster, mean)
+aggregate(data = data, partner ~ KMEANS_4$cluster, mean)
+aggregate(data = data, kidstogether ~ KMEANS_4$cluster, mean)
+
+
+
+#TOgether with the boxplot below it can give us a good insight 
+#of the avarage characteriscits of observations in a particular cluster just like in case of 3 clusters.
+
+
+
+groupBWplot(cluster_z, KMEANS_3$cluster, alpha=0.05)
+
+#Customers from 1 cluster: medium income and expenditures compared to others, eager to buy with discounts and via internet
+#Customers from 2 cluster: the wealthiest, spend much, especially on wines, only few have children at home
+#Customers from 3 cluster: on average almost as wealthy as guys from 2nd cluster, spend much, especially on fruits, sweets, fish, complain the most, only few have children at home
+#Customers from 4 cluster: the poorest and smallest expenditures, complain often, dont buy via internet, but browse page often
+
+
+```
+
+
+```{r}
+
+#lets compare the quality between kmeans_3 and kmeans_4:
+
+
+#Calinski-Harabasz - good for comparing algorithms for different number of clusters -the higher statistic the better
+round(calinhara(cluster_z, KMEANS_4$cluster),digits=2) #fpc::calinhara()
+round(calinhara(cluster_z, KMEANS_3$cluster),digits=2) #fpc::calinhara()
+
+#Better statistics for 3 clusters
+
+
+#Duda-Hart test for whether a data set should be split into two clusters.
+
+dudahart2(cluster_z, KMEANS_4$cluster) 
+dudahart2(cluster_z, KMEANS_3$cluster) 
+
+#For both cases the test gives same result, that data should be split.
+
+
+##########################################
+```
+
+
+
+```{r}
+
+#PROPER CLUSTERING  CLARA  3
+
+##########################################
+# I decided to choose CLARA algorithm instead of PAM as it deals better with large datasets.
+# CLARA draws multiple samples of the dataset, then applies PAM on each sample, and gives the
+# best clustering as the output
+
+
+
+clara_3 <- eclust(cluster_z,'clara',k=3,hc_metric = 'euclidean', graph = FALSE)
+
+
+plot_clara_3 <- fviz_cluster(clara_3, geom = c("point")) + ggtitle('CLARA with 3 clusters')
+plot_clara_3
+
+
+
+summary(clara_3)
+
+fviz_silhouette(clara_3)
+
+#Almost same silhoutte value as Kmeans_3.
+
+#We can also group observations of customers in different clusters like above, this time I will compare only chosen variables.
+
+aggregate(data = data, Income ~ clara_3$cluster, mean)
+aggregate(data = data, MntMeatProducts ~ clara_3$cluster, mean)
+aggregate(data = data, NumCatalogPurchases ~ clara_3$cluster, mean)
+aggregate(data = data, NumStorePurchases ~ clara_3$cluster, mean)
+aggregate(data = data, Complain ~ clara_3$cluster, mean)
+aggregate(data = data, kidstogether ~ clara_3$cluster, mean)
+
+
+#Cluster 1: the wealthiest, spend much more than others (at least on meat), only few of them have kids at home
+#Cluster 2: Also wealthy but spend much less (at least on meat), complain most
+#Cluster 3: The least income,  buy much much less than customers from other clusters, much less expenditures, have more children on average
+
+```
+
+
+```{r}
+#PROPER CLUSTERING  CLARA  4
+
+##########################################
+
+clara_4 <- eclust(cluster_z,'clara',k=4,hc_metric = 'euclidean', graph = FALSE)
+
+
+plot_clara_3 <- fviz_cluster(clara_4, geom = c("point")) + ggtitle('CLARA with 4 clusters')
+plot_clara_3
+
+
+fviz_silhouette(clara_4)
+
+
+#Checking  better number of cluster based on quality - with higher Calinhara index 3 clusters are also here a better option.
+
+round(calinhara(cluster_z, clara_4$cluster),digits=2) 
+round(calinhara(cluster_z, clara_3$cluster),digits=2) 
+```
+
+
+Conclusions 
+
+As we could see clustering can be a great tool for customers segmentation. Nevertheless for real business problem the number of clusters  should be greater than what I performed here and characteristics of particular groups more precise to make use of it.

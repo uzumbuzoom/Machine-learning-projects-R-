@@ -1,0 +1,197 @@
+---
+title: "Edyta Pszczolkowska (ID 435022) - Dimension reduction using PCA"
+output:
+  html_document:
+    df_print: paged
+---
+
+The aim of this paper is to implement a principal component analysis algorithm on a dataset downloaded from kaggle.com concerning some
+major indicators of countries development. The original dataset contained 82 variables, but many of them had incomplete data. Therefore,
+I have chosen 11 of them where number of missing values wasn't too high. These are following,  all of them  self-exploratory:
+
+1) average years of schooling [years]
+2) life expectancy at birth [years]
+3) percantage of women seats in parliament [%]
+4) population in 2015 [million]
+5) population growth [%]
+6) infant mortality [1 per 1000]
+7) number of physicians [1 per 100.000]
+8) expenditures on health care as % of GDP [%]
+9) unemployment [%]
+10) percentage of urban population [%]
+11) percentage of internet user [%]
+
+
+```{r}
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+```
+
+```{r}
+df <- read.csv("HDI.csv")
+
+#data prepration - choosing most important variables not containing too much NAs
+
+my_df <- df[ , c(6,7,25,29,32,33, 46,54,55,60,68)]
+
+
+my_df <- my_df[complete.cases(my_df), ]
+
+colnames(my_df)
+
+#Changing column names for better view of plots
+
+colnames(my_df) <- c("life_exp", "y_school", "women_MP", "pop_2015", "pop_growth", "urban_pop", "inf_mort", "doctors", "health_gdp", "unemployed", "internet")
+
+
+
+```
+
+```{r}
+#To measure correlation between variables we don't need to normalize data, BUT we must do it while running PCA algorithm.
+
+library(corrplot) 
+
+cor<-cor(my_df, method="pearson")
+```
+
+
+```{r}
+print(cor, digits= 1)
+
+corrplot(cor)
+
+#the magnitude and direction of correlation in this dataset is something we could predict, e.g mortality of infants is highly negatively correlated with life expectancy.
+#Which consequences it has for our PCA? Let's see.
+
+```
+
+
+```{r}
+#Let's calculate  eigenvalues and eigenvectors on the basis of covariance. THis time normalisation of data is needed.
+
+library(caret)
+
+preproc1 <- preProcess(my_df, method=c("center", "scale"))
+my_df.s <- predict(preproc1, my_df)
+
+summary(my_df.s)
+
+
+
+my_df.cov<-cov(my_df.s)
+my_df.eigen<-eigen(my_df.cov)
+my_df.eigen$values
+
+# According to Kaiser's criterion, only those components whose eigenvalue is greater than one should be taken into consideration. So judging by this criterion we need the first three ones.
+
+
+my_df.eigen$vectors
+
+
+# The higher absolute value of the eigenvector, the importance of variable in the component is higher. 
+#The sign of eigenvector indicates negative or positive correlation between variables. 
+
+```
+
+
+```{r}
+#Proper PCA
+
+
+library(factoextra)
+
+pca <- prcomp(my_df, center=TRUE, scale=TRUE)
+summary(pca)
+fviz_eig(pca)
+
+#First two components explain almost 60% of variance - quite good.
+#We need 4 components to explain 78,18% of variance and 5 components to explain  84,89% of variance.
+
+
+
+
+
+fviz_pca_var(pca, col.var="contrib")+
+  scale_color_gradient2(low="yellow", mid="red", 
+                        high="black", midpoint=10)+theme_bw()
+
+#
+#The graph below represents a lot of valuable data. It can be interpreted as follow:
+
+# Positively correlated variables are grouped together.
+
+#- There is a big highly correlated group of the following variables: life expectancy, 
+#percentage of population using internet, percentage of people living in town/cities,  
+#years of schooling and number of doctors.
+
+
+# Negatively correlated variables are positioned on opposite sides of the plot origin (opposed quadrants).
+#-infant mortality vs. life expectancy
+#-infant mortality vs. years of schooling
+#- percentage of GDP expenditure on health vs. population growth
+
+#Variables that are away from the origin (longer arrows) are well represented on the factor map.
+#Additionally we may set plot in such a way that it is illustrated by the color: the higher contribution to the first two components, 
+#the darker arrow, so: the most important variables in this case are infant mortality, life expectancy and % of population with the access to the internet
+# and the least important are percentage of women in Parliament and  population and population growth.
+
+
+```
+
+
+```{r}
+#To get more insight of the contribution of variables to particular components, let's create a graph for the first two of them:
+
+library(pdp)
+PC1 <- fviz_contrib(pca, choice = "var", axes = 1)
+PC2 <- fviz_contrib(pca, choice = "var", axes = 2)
+
+grid.arrange(PC1, PC2)
+
+#On the graphs of the first two components we can see a relation with the plot above: 
+#1)arrows representing following variables: % of internet users, life expectancy, infant mortality and years of schooling are the longest  ones along 1st dimension (horizontal one)
+# and the shortest are population and unemployment rate - and it is adequate to the graph of DIM1 variables' contribution where we can see which variables contribute more and less to this dimension.
+#2)arrows representing following variables: unemployment rate, population in 2015, % of GDP expenditures on health are the longest ones along 2nd dimension (vertical one)
+#and the shortest are doctors per 100.000 citizens, and years of schooling - and it is adequate to the graph of DIM2 variables' contribution where we can see which variables contribute more and less to this dimension.
+
+
+
+
+#############################################################################
+#We can perform same analysis for the 3rd component, the interpretation of the results are analogical to those above.
+
+
+fviz_pca_var(pca, col.var="contrib",  axes = c(2, 3)) + scale_color_gradient2(low="yellow", mid="red", 
+                                                                              high="black", midpoint=10)+theme_bw()
+
+
+
+PC2 <- fviz_contrib(pca, choice = "var", axes = 2)
+PC3 <- fviz_contrib(pca, choice = "var", axes = 3)
+grid.arrange(PC2, PC3)
+
+
+# Let's plot unlabeled observations in two dimensions with coloured quality of representation
+# DIM1 & DIM2
+fviz_pca_ind(pca, col.ind="cos2", geom="point", gradient.cols=c("white", "#2E9FDF", "#FC4E07" ), repel=TRUE)
+
+#The output seems to be equally distributed except for two outliers.
+
+
+# DIM2 & DIM3
+fviz_pca_ind(pca, col.ind="cos2", geom="point", gradient.cols=c("white", "#2E9FDF", "#FC4E07" ), axes = c(2,3))
+
+#more outliers here
+
+
+```
+
+
+
+
+Conclusions
+
+Because of substantial correlation between data, the dimension reduction gives a good result - only first two components explain
+almost 60% of variance, three more than 78%. Therefore such an reduced dataset might be useful in further analysis.

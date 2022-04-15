@@ -1,0 +1,119 @@
+---
+title: "Edyta Pszczolkowska (ID 435022) - association rules using apriori algorithm"
+output:
+  html_document:
+    df_print: paged
+---
+
+In this paper I will perform apriori algorithm on a dataset of transactions from a bakery. 
+the aim of such a project is to discover rules indicating what drives consumers to buy 
+certain products or the other way round: what are they likely to
+buy additionally once they put particular set of items to their basket.
+
+```{r}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+```{r}
+
+#loading packages and preparing dataset
+
+library(arulesViz)
+library(arules)
+
+df <- read.csv("bread basket.csv")
+
+df <- df[ , c(1,2)]
+
+dir.create(path = "tmp", showWarnings = FALSE)
+
+# Write our data.frame to a csv
+write.csv(df, "./tmp/my_file.csv")
+
+# Read that csv back in
+bakery <- read.transactions(
+  file = "./tmp/my_file.csv",
+  format = "single",
+  sep = ",",
+  cols=c("Transaction","Item"),
+  header = TRUE,
+  rm.duplicates = T
+)
+summary(bakery)
+
+```
+
+```{r}
+#SUPPORT - one of three most basic measures in market basket analysis
+itemFrequency(bakery, type="relative")
+itemFrequency(bakery, type="absolute")
+
+
+
+#Let's plot the mosr frequent ones:
+itemFrequencyPlot(bakery, support = 0.1)
+
+itemFrequencyPlot(bakery, topN=10, type="absolute", main="Items Frequency") 
+
+#Let's plot 100 random transactions, on the X-axis there are numbers representing particular items, those
+#products which are often purchased form a vertical line on the plot.
+image(sample(bakery, 100))
+##################################################
+#LETS PLAY A GAME!!!
+
+#The choice of parameters is arbitrary, but there is a trade off between quality of measures and  minimum length of a dataset, 
+#if one of them is high, then the second one need to be adequately lower.
+bakeryrules <- apriori(bakery, parameter = list(support = 0.007, confidence = 0.01, minlen = 3))
+
+#Following commands define the most important rules sorted by three major measures: support, lift and confidence. 
+inspect(sort(bakeryrules, by = "lift")[1:5])
+inspect(sort(bakeryrules, by = "support")[1:5])
+inspect(sort(bakeryrules, by = "confidence")[1:5])
+
+summary(bakeryrules)
+
+
+
+# what drives people to buy coke?
+rules.coke<-apriori(data=bakery, parameter=list(supp=0.01,conf = 0.005), 
+                       appearance=list(default="lhs", rhs="Coke"), control=list(verbose=F)) 
+rules.coke.byconf<-sort(rules.coke, by="confidence", decreasing=TRUE)
+inspect(head(rules.coke.byconf))
+
+#as we can see customers the most often buy coke without anything - maybe simply a promotion 2 coke +1 for free would be a good idea?
+
+# on the opposite - what do customers prefer when they eat sandwich: tea, coffee, a juice...?
+rules.sandwich<-apriori(data=bakery, parameter=list(supp=0.005,conf = 0.005), 
+                          appearance=list(default="rhs", lhs="Sandwich"), control=list(verbose=F)) 
+rules.sandwich.byconf<-sort(rules.sandwich, by="confidence", decreasing=TRUE)
+inspect(head(rules.sandwich.byconf))
+
+#they are more likely to buy a coffee - let's offer a sandwich + coffee for 1€
+
+#Let's check significance of the rules with Fisher’s exact :
+is.significant(rules.coke, bakery)
+is.significant(rules.sandwich, bakery)
+
+#Redundancy - if there is a more general one with the same or higher confidence value.
+is.redundant(rules.coke)
+is.redundant(rules.sandwich)
+
+
+
+
+library(arulesCBA)
+
+#Let's plot now all three major indicators at once:
+
+plot(bakeryrules, measure=c("support","lift"), shading="confidence")
+plot(bakeryrules, method="grouped")
+plot(bakeryrules, method="graph", control=list(type="items"))
+
+```
+
+
+CONCLUSION
+
+In my personal opinion, the apriori algorithm is not complicated, but the insight we obtain from its output can give us extremely useful
+knowledge. Moreover it has much broader application than only market basket analysis, e.g. based on particular traits we can predict a result of
+an experiment, survey.
