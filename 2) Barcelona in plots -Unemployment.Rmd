@@ -1,0 +1,359 @@
+---
+title: "Barcelona in plots"
+author: "Min Jhen Wu, Edyta Pszczółkowska"
+date: "17 12 2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE )
+
+```
+
+## Loading necessary packages and datasets
+
+```{r}
+library(ggrepel)
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(tidyr)
+library(RColorBrewer)
+
+
+setwd("D:\\Edyta pliki\\DS\\III semestr\\AdvVis in R\\project")
+
+#accidents <- read.csv("accidents_2017.csv")
+#air_quality_Nov <- read.csv("air_quality_Nov2017.csv")
+#air_stations_Nov <- read.csv("air_stations_Nov2017.csv")
+births <- read.csv("births.csv")
+#bus_stops <- read.csv("bus_stops.csv")
+#deaths <- read.csv("deaths.csv")
+#immigrants_by_nationality <- read.csv("immigrants_by_nationality.csv")
+#immigrants_emigrants_by_age <- read.csv("immigrants_emigrants_by_age.csv")
+#immigrants_emigrants_by_destination <- read.csv("immigrants_emigrants_by_destination.csv")
+#immigrants_emigrants_by_destination2 <- read.csv("immigrants_emigrants_by_destination2.csv")
+#immigrants_emigrants_by_sex <- read.csv("immigrants_emigrants_by_sex.csv")
+life_expectancy <- read.csv("life_expectancy.csv")
+#most_frequent_baby_names <- read.csv("most_frequent_baby_names.csv")
+population <- read.csv("population.csv")
+#transports <- read.csv("transports.csv")
+unemployment <- read.csv("unemployment.csv")
+```
+
+
+
+
+
+
+
+### Unemployment by month and gender in 2017
+
+```{r}
+
+
+# Unemployment by month (2013)
+U_2013 <- unemployment %>%
+  filter(Year=="2013",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month, Gender) %>%
+  summarise(Count=sum(Number)) %>%
+  mutate(Month = factor(Month, levels=c("January", "February", "March",
+                                                           "April","May", "June",
+                                                          "July", "August", "September",
+                                                            "October", "November", "December")))
+
+ggplot(data = U_2013, aes(x = Month, y = Count, group = Gender)) +
+  geom_line(aes( color = factor(Gender))) +
+  theme_minimal() +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  + 
+  guides(color =  guide_legend(title = "Gender")) +
+  labs(
+       y = "Unemployed",
+       title = "Unemployment by Gender in 2017",
+       caption = "Source: Kaggle") +
+ 
+  geom_label_repel(aes(label = Count, color = Gender), size = 2.5) 
+
+
+```
+
+
+
+What is quite obviuos, in the main tourist season, i.e. June - September, the number of unepmoyed drops significantly.
+As we can see on the plot, we may not conclude, if these are always females to be unemployed.
+ Let's check how it was by average in years 2013-2017: 
+
+
+### in absolute terms by gender
+
+```{r}
+
+
+Mean_2013 <- U_2013 %>%
+  group_by(Gender) %>%
+  summarise(Mean_unemployment = mean(Count))
+
+Mean_2013$Year <- "2013"
+
+
+
+U_2014 <- unemployment %>%
+  filter(Year=="2014",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month, Gender) %>%
+  summarise(Count=sum(Number)) 
+
+
+Mean_2014 <- U_2014 %>%
+  group_by(Gender) %>%
+  summarise(Mean_unemployment = mean(Count))
+
+Mean_2014$Year <- "2014"
+
+U_2015 <- unemployment %>%
+  filter(Year=="2015",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month, Gender) %>%
+  summarise(Count=sum(Number)) 
+
+
+Mean_2015 <- U_2015 %>%
+  group_by(Gender) %>%
+  summarise(Mean_unemployment = mean(Count))
+
+
+
+Mean_2015$Year <- "2015"
+
+
+U_2016 <- unemployment %>%
+  filter(Year=="2016",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month, Gender) %>%
+  summarise(Count=sum(Number)) 
+
+Mean_2016 <- U_2016 %>%
+  group_by(Gender) %>%
+  summarise(Mean_unemployment = mean(Count))
+
+Mean_2016$Year <- "2016"
+
+U_2017 <- unemployment %>%
+  filter(Year=="2017",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month, Gender) %>%
+  summarise(Count=sum(Number)) 
+
+Mean_2017 <- U_2017 %>%
+  group_by(Gender) %>%
+  summarise(Mean_unemployment = mean(Count))
+
+Mean_2017$Year <- "2017"
+
+
+U_2013_2017 <- as.data.frame(rbind(Mean_2013, Mean_2014, Mean_2015, Mean_2016, Mean_2017 ))
+
+
+
+ggplot(data = U_2013_2017, aes(x = Year, y = Mean_unemployment, group = Gender)) +
+  geom_line(aes( color = factor(Gender))) +
+  theme_minimal() +
+  geom_point() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  + 
+  guides(color =  guide_legend(title = "Gender")) +
+  labs(
+       y = "Unemployed",
+       title = "Unemployment by Gender",
+       subtitle = "2013 - 2017",
+       caption = "Source: Kaggle") 
+```
+
+
+Here the situation is clear: by average women are more likely to be unemployed. 
+The reason why the unemployment was constantly dropping is the fact, that Spain suffered severely due to crisis in EURO zone and in the examined period its economy rebounded what can also be seen on the next graph.
+
+
+
+
+
+```{r}
+
+
+labour_force_2013_2017 <-  population %>%
+                           filter( Age %in% c("20-24", '25-29', '30-34', '35-39','40-44','45-49','50-54','55-59','60-64')) %>%
+                           group_by(Year) %>%
+                            summarise(Count = sum(Number))
+
+
+#total_unemployed by month
+
+total_unemployed_2013 <-  unemployment %>%
+  filter(Year=="2013",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month) %>%
+  summarise(Count=sum(Number)) 
+
+ 
+
+Un_2013 <- mean(total_unemployed_2013$Count)
+  
+
+
+total_unemployed_2014 <-  unemployment %>%
+  filter(Year=="2014",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month) %>%
+  summarise(Count=sum(Number)) 
+
+ 
+
+Un_2014 <- mean(total_unemployed_2014$Count)
+
+
+total_unemployed_2015 <-  unemployment %>%
+  filter(Year=="2015",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month) %>%
+  summarise(Count=sum(Number)) 
+
+ 
+
+Un_2015 <- mean(total_unemployed_2015$Count)
+
+
+total_unemployed_2016 <-  unemployment %>%
+  filter(Year=="2016",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month) %>%
+  summarise(Count=sum(Number)) 
+
+ 
+
+Un_2016 <- mean(total_unemployed_2016$Count)
+
+
+
+total_unemployed_2017 <-  unemployment %>%
+  filter(Year=="2017",
+         Demand_occupation=="Registered unemployed",
+         District.Name!="No consta") %>%
+  group_by(Month) %>%
+  summarise(Count=sum(Number)) 
+
+ 
+
+Un_2017 <- mean(total_unemployed_2017$Count)
+
+labour_force_2013_2017$unemployed <- c(Un_2013, Un_2014, Un_2015, Un_2016, Un_2017)
+
+labour_force_2013_2017$Unemployment_rate <- (round(labour_force_2013_2017$unemployed / labour_force_2013_2017$Count * 100, 2))
+
+
+ggplot(data = labour_force_2013_2017, aes(x = Year)) +
+  geom_line(aes(y = labour_force_2013_2017$unemployed), color = "steelblue", size = 1.25) + # I series
+  geom_line(aes(y = labour_force_2013_2017$Unemployment_rate*8000 + 10000), color = "red", size = 1.25) + # II series (scaled-up)
+  theme_minimal() + 
+  labs(y = "Unemployed", title = "Unemployment in absolute and percentage terms, 2013-2017") +
+  
+  scale_y_continuous(sec.axis = sec_axis(~(. - 10000)/8000   , name = 'Unemployment rate [%] '), labels = comma ) + 
+  theme(
+    axis.text.y.left = element_text(color = 'steelblue'),
+    axis.text.y.right = element_text(color = 'red'),
+    axis.title.y.left = element_text(color = 'steelblue'),
+    axis.title.y.right = element_text(color = 'red')
+  )  
+
+```
+ 
+
+
+
+
+### Unemployment by districts
+
+As for the end of this part, let us see the unemployment with respect to the districts:
+
+
+
+
+```{r}
+Unmeployed_by_District <- unemployment %>% 
+  filter(Year == "2017") %>% 
+  filter(Month == "December") %>%
+  filter(District.Name != "No consta") %>%
+  filter(Demand_occupation=="Registered unemployed") %>%
+  group_by(District.Name, Gender) %>%
+  summarise(Count=sum(Number)) %>%
+  mutate(percent=paste0(round((Count/sum(Count))*100, 2), "%"))
+
+
+  ggplot(Unmeployed_by_District, aes(x=reorder(District.Name,  Count),  y = Count, fill = Gender )) +
+  geom_bar(stat="identity") +
+    geom_text(aes(label=percent, group=Gender), position=position_stack(vjust=0.5), size = 3.5)  +
+    coord_flip() +
+  labs(x="District name", y="Unemployed", title="Unemployment by district and gender in absolute terms", subtitle = "December 2017")  + 
+    scale_y_continuous( breaks = seq(0,15000,by=3000),
+                        labels = format(seq(0,15000,by=3000), big.mark = " "))
+  
+
+  
+```
+
+### as unemployment rate 
+
+```{r}
+labour_force_2017 <-  population %>%
+                           filter( Age %in% c("20-24", '25-29', '30-34', '35-39','40-44','45-49','50-54','55-59','60-64')) %>%
+                            filter(Year == "2017") %>%
+                           group_by(District.Name) %>%
+                            summarise(Count = sum(Number))
+
+
+#unemployment all, without splitting to gender 
+Unmeployed_by_District2 <- unemployment %>% 
+  filter(Year == "2017") %>% 
+  filter(Month == "December") %>%
+  filter(District.Name != "No consta") %>%
+  filter(Demand_occupation=="Registered unemployed") %>%
+  group_by(District.Name) %>%
+  summarise(Count=sum(Number)) 
+
+Unmeployed_by_District2 <- merge(Unmeployed_by_District2, labour_force_2017, by = "District.Name")
+
+Unmeployed_by_District2$unemployement_rate <- round(Unmeployed_by_District2$Count.x/Unmeployed_by_District2$Count.y * 100 ,  2)
+
+Unmeployed_by_District2$unemployement_rate_labels <-  paste0(Unmeployed_by_District2$unemployement_rate , "%")
+
+
+
+
+
+
+ ggplot(Unmeployed_by_District2, aes(x=reorder(District.Name,  unemployement_rate),  y = unemployement_rate )) +
+  geom_bar(stat="identity", aes(fill=unemployement_rate))  +
+    scale_y_continuous( labels = comma ) +
+    coord_flip() +
+  labs(x="District name", y="Unemployment rate [%]", title="Unemployment rate by district", subtitle = "December 2017") +
+  scale_fill_gradient(low="paleturquoise", high="paleturquoise4") +
+  
+  geom_label(aes(label=unemployement_rate_labels), hjust=1) + 
+  theme(legend.position="none")
+
+```
+
+
+
+
+
+

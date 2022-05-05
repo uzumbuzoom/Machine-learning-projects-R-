@@ -1,0 +1,223 @@
+---
+title: "Population, Births, Deaths"
+author: "Edyta Pszczółkowska 435022"
+date: "8 01 2022"
+output: html_document
+---
+
+
+###  Introduction
+
+
+We will cover  4 main topics regarding living in Barcelona: 
+
+* Population, births, deaths (Edyta)
+* Unemployment (Edyta)
+* Transport, accidents (Min)
+* Immigration (Min)
+
+
+
+Our main question which we want to answer by following visualisations is:
+
+***Is Barcelona a good place to live?***
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE )
+
+```
+
+# Loading necessary packages and datasets
+
+The whole dataset consists of 17 separate csv files.
+
+
+```{r}
+
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(tidyr)
+library(RColorBrewer)
+library(ggcharts)
+library(ggthemes)
+library(ggplot2)
+library(ggrepel)
+library(tidyverse)
+
+setwd("D:\\Edyta pliki\\DS\\III semestr\\AdvVis in R\\project")
+
+#accidents <- read.csv("accidents_2017.csv")
+#air_quality_Nov <- read.csv("air_quality_Nov2017.csv")
+#air_stations_Nov <- read.csv("air_stations_Nov2017.csv")
+births <- read.csv("births.csv")
+#bus_stops <- read.csv("bus_stops.csv")
+deaths <- read.csv("deaths.csv")
+#immigrants_by_nationality <- read.csv("immigrants_by_nationality.csv")
+immigrants_emigrants_by_age <- read.csv("immigrants_emigrants_by_age.csv")
+#immigrants_emigrants_by_destination <- read.csv("immigrants_emigrants_by_destination.csv")
+#immigrants_emigrants_by_destination2 <- read.csv("immigrants_emigrants_by_destination2.csv")
+immigrants_emigrants_by_sex <- read.csv("immigrants_emigrants_by_sex.csv")
+#life_expectancy <- read.csv("life_expectancy.csv")
+#most_frequent_baby_names <- read.csv("most_frequent_baby_names.csv")
+population <- read.csv("population.csv")
+#transports <- read.csv("transports.csv")
+#unemployment <- read.csv("unemployment.csv")
+```
+
+
+### Population
+
+Let us plot the distribution of age and gender in the whole population with the most apropriate tool to achieve it: pyramid chart:
+
+```{r}
+population2017 <- population %>%
+  filter(Year=="2017") %>%
+  group_by(Age, Gender) %>%
+  summarise(Count = sum(Number))
+
+
+population2017$Age[population2017$Age == "5-9"] <- "05-09"
+population2017$Age[population2017$Age == ">=95"] <- "95+"
+pyramid_chart(data = population2017, x = Age, y = Count, group = Gender, title = "Population pyrimid as of 2017", xlab = "Number" ) 
+
+```
+
+
+We can see, that the demographic situation in Barcelona is rather stable one: there is enough children and youngsters to replace current labour force in the future.
+
+
+## Births grouped by years
+
+
+```{r}
+# Births by year
+births %>%
+  group_by(Year, Gender) %>%
+  summarise(Count=sum(Number)) %>%
+  mutate(percent=paste0(round((Count/sum(Count))*100, 2), "%")) %>%
+  ggplot(aes(x=Year, y=Count, fill=Gender)) +
+  geom_bar(stat="identity", position="stack") + 
+  geom_text(aes(label=percent, group=Gender), position=position_stack(vjust=0.5)) +
+  labs(x="Year", y="Births", title="Births by year (2013-2017)") +
+  scale_y_continuous(labels=comma, breaks = seq(0,15000, 2500)) +
+  theme_bw()
+
+```
+
+
+The number of children born in years 2013-2017 remain on the same level. It is quite puzzling, why it were always boys that were born more than girls.
+
+### Population by district
+
+```{r}
+population_by_district <- population %>%
+  filter(Year == "2017") %>%
+  group_by(District.Name) %>%
+  summarise(Pop_count = (sum(Number))) %>%
+  arrange(desc(Pop_count))  
+
+# population_by_district
+# 
+# ggplot(population_by_district, aes(x="", y=Pop_count, fill=District.Name)) +
+#   geom_bar(stat="identity", width=1, color="white") +
+#   coord_polar("y", start=0)+
+#   
+#   theme_void()
+
+data_for_pie <- population_by_district %>% 
+  arrange(desc(District.Name)) %>%
+  mutate(prop = Pop_count / sum(population_by_district$Pop_count) *100) %>%
+  mutate(ypos = cumsum(prop)- 0.5*prop ) %>%
+  arrange((Pop_count))
+
+data_for_pie$value <-  (round(data_for_pie$prop,2)) 
+
+
+
+df2 <- data_for_pie %>% 
+  mutate(csum = rev(cumsum(rev(value))), 
+         pos = value/2 + lead(csum, 1),
+         pos = if_else(is.na(pos), value/2, pos))
+
+ggplot(df2, aes(x = "" , y = value, fill = fct_inorder(District.Name))) +
+  geom_col(width = 1, color = 1) +
+  coord_polar(theta = "y") +
+  scale_fill_brewer(palette = "Oranges") +
+  geom_label_repel(data = df2,
+                   aes(y = pos, label = paste0(value, "%")),
+                   size = 4.5, nudge_x = 1, show.legend = FALSE) +
+  guides(fill = guide_legend(title = "District Names")) +
+  theme_void() +   
+  labs(title =  "Percent of population with respect to districts",
+       subtitle = '2017')
+```
+
+
+
+
+
+## Immigrants in Barcelona
+
+
+Barcelona is a place which seems to be a paradise to live: warm pleasant mediterranean climat, culture, food and atmosphere.
+It is a very popular travel destination. But how many people decide to stay there longer:
+
+The following graph gives us an answer.
+Let's check how big is the ratio of immigrants to the whole population:
+
+
+```{r}
+
+immigrants_2013_2017  <- immigrants_emigrants_by_sex %>%
+                        group_by(Year) %>%
+                        summarise(Immigrants = sum(Immigrants))
+
+
+
+
+  
+
+immigrants_2013_2017
+
+```
+
+```{r}
+population_2013_2017 <- population  %>%
+  group_by(Year) %>%
+  summarise(Count_population = sum(Number))
+population_2013_2017
+```
+
+
+```{r}
+pop_immigrants <- merge(immigrants_2013_2017,population_2013_2017 , by = "Year" )
+
+pop_immigrants$ratio <- round(pop_immigrants$Immigrants / pop_immigrants$Count_population * 100 ,2 )
+
+pop_immigrants$plot_label <- paste0(pop_immigrants$ratio , "%")
+
+pop_immigrants
+```
+
+
+```{r}
+ggplot(pop_immigrants) +
+   geom_bar(aes(x =  Year , y = Immigrants) , stat = "identity")  +
+  geom_line(aes(x =  Year, y = ratio*10000, color = "ratio of immigrants in the whole population [%]" ), size= 2 ) + 
+  theme(legend.position = 'bottom')  +
+  scale_color_manual(values = c('red'))  +
+   labs(color = NULL)  +
+     scale_y_continuous( 
+    labels = comma,
+    sec.axis = sec_axis(~./5000),  )   + 
+  labs(title =  "Immigrants in absolute terms and as part of population , 2013-2017")
+
+```
+
+
+
+
+

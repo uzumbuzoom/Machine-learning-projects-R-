@@ -1,0 +1,214 @@
+---
+title: "Polution"
+author: "Edyta Pszczółkowska 435022"
+date: "9 01 2022"
+output: html_document
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE )
+
+```
+
+## Loading necessary packages and datasets
+
+```{r}
+library(ggpubr)
+
+library(ggplot2)
+library(dplyr)
+library(scales)
+library(tidyr)
+library(RColorBrewer)
+
+library("gridExtra")
+
+setwd("D:\\Edyta pliki\\DS\\III semestr\\AdvVis in R\\project")
+
+accidents <- read.csv("accidents_2017.csv")
+air_quality_Nov <- read.csv("air_quality_Nov2017.csv")
+air_stations_Nov <- read.csv("air_stations_Nov2017.csv")
+births <- read.csv("births.csv")
+deaths <- read.csv("deaths.csv")
+immigrants_by_nationality <- read.csv("immigrants_by_nationality.csv")
+immigrants_emigrants_by_age <- read.csv("immigrants_emigrants_by_age.csv")
+immigrants_emigrants_by_destination <- read.csv("immigrants_emigrants_by_destination.csv")
+immigrants_emigrants_by_destination2 <- read.csv("immigrants_emigrants_by_destination2.csv")
+immigrants_emigrants_by_sex <- read.csv("immigrants_emigrants_by_sex.csv")
+life_expectancy <- read.csv("life_expectancy.csv")
+most_frequent_baby_names <- read.csv("most_frequent_baby_names.csv")
+population <- read.csv("population.csv")
+transports <- read.csv("transports.csv")
+unemployment <- read.csv("unemployment.csv")
+```
+
+
+Let's ,plot density of 4  most populous districts.
+
+
+```{r}
+
+air1 <-  air_quality_Nov %>%
+  filter(Station == "Barcelona - Eixample")
+
+plot1 <- ggplot(data = air1 ) +
+  geom_density(aes(x = NO2.Value, color = "NO2")) +
+  geom_density(aes(x = O3.Value, color = "O3")) +
+  geom_density(aes(x = PM10.Value, color = "PM10")) +
+  scale_y_continuous(limits = c(0 , 0.08, 0,02)) +
+  scale_x_continuous(limits = c(0 , 120)) +
+  labs(title = "Eixample",
+      y = " ",
+       x= expression(mu*g/m^3)) +
+  theme(legend.position = 'top')  +
+  scale_color_manual(values = c('green', 'black', 'red'))  +
+   labs(color = NULL) +
+  theme_bw()
+
+
+
+air2 <- air_quality_Nov %>%
+  filter(Station == "Barcelona - Observ Fabra") 
+ 
+plot2 <-  ggplot(data = air2 ) +
+  geom_density(aes(x = NO2.Value , color = "NO2" )) +
+  geom_density(aes(x = O3.Value , color = "O3" ))  +
+   geom_density(aes(x = O3.Value , color = "PM10" ))  +
+  scale_y_continuous(limits = c(0 , 0.08, 0,02)) +
+  scale_x_continuous(limits = c(0 , 120)) +
+  labs(title = "Observ Fabra",
+       y = " ",
+       x= expression(mu*g/m^3)) +
+  theme(legend.position = 'top')  +
+  scale_color_manual(values = c('green', 'black', 'red'))  +
+   labs(color = NULL) +
+  theme_bw()
+
+
+air3 <-  air_quality_Nov %>%
+  filter(Station == "Barcelona - Vall Hebron")
+
+plot3 <- ggplot(data = air3 ) +
+  geom_density(aes(x = NO2.Value, color = "NO2")) +
+  geom_density(aes(x = O3.Value, color = "O3")) +
+  geom_density(aes(x = PM10.Value, color = "PM10")) +
+  scale_y_continuous(limits = c(0 , 0.08, 0,02)) +
+  scale_x_continuous(limits = c(0 , 120)) +
+  labs(title = "Poblenou",
+       y = " ",
+       x= expression(mu*g/m^3)) +
+  theme(legend.position = 'top')  +
+  scale_color_manual(values = c('green', 'black', 'red'))  +
+   labs(color = NULL) +
+  theme_bw()
+
+
+
+air4 <- air_quality_Nov %>%
+  filter(Station == "Barcelona - Palau Reial")
+
+plot4 <- ggplot(data = air4 ) +
+  geom_density(aes(x = NO2.Value, color = "NO2")) +
+  geom_density(aes(x = O3.Value, color = "O3")) +
+  geom_density(aes(x = PM10.Value, color = "PM10")) +
+  scale_y_continuous(limits = c(0 , 0.1, 0,02)) +
+  scale_x_continuous(limits = c(0 , 120)) +
+  labs(title = "Palau Reial ",
+       y = " ",
+       x= expression(mu*g/m^3)) +
+  theme(legend.position = 'top')  +
+  scale_color_manual(values = c('green', 'black', 'red'))  +
+   labs(color = NULL) +
+  theme_bw()
+
+
+air1 = rm()
+#air2 = rm()
+air3 = rm()
+air4 = rm()
+
+
+
+grid.arrange(arrangeGrob(plot1 + theme(legend.position = "none"), # first plot (no legend)
+                         plot2 + theme(legend.position = "none"), # second plot (no legend)
+                         plot3 + theme(legend.position = "none"), # third plot (no legend)
+                         plot4 + theme(legend.position = "none"), # fourth plot (no legend)
+                         ncol = 2), 
+                          nrow = 2,
+                         top = "Air quality measurements, November 2018",
+                        heights = c(10, 1))
+
+
+
+```
+
+
+
+
+### Distribution of air pollution
+
+
+Source: https://powietrze.gios.gov.pl/pjp/content/annual_assessment_air_target_level
+
+
+
+
+
+
+
+```{r}
+
+
+
+air_quality_Nov$Station2 <- substr(air_quality_Nov$Station, 13, nchar(air_quality_Nov$Station))
+
+
+ ggplot(data = air_quality_Nov, aes(y = NO2.Value, x = Station2, color = Station2)) +
+    geom_boxplot(varwidth = TRUE) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  scale_y_continuous(breaks = seq(0, 120, 10)) +
+  labs(title = "NO2 values by district", 
+       subtitle = "November 2018",
+       x = "",
+              caption =   "Source: https://powietrze.gios.gov.pl/pjp/content/annual_assessment_air_target_level",
+       y= expression(NO[2]~(mu*g/m^3)))  + 
+  geom_hline(yintercept=40, linetype="dashed", color = "red", size =0.7)+ theme(legend.position = "none") + 
+  geom_text(x = 8, y = 45, label = "Critical value", color = 'red')
+
+ ggplot(data = air_quality_Nov, aes(y = PM10.Value, x = Station2, color = Station2)) +
+  geom_boxplot(varwidth = TRUE) + 
+  scale_y_continuous(breaks = seq(0, 50, 5)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(title = "PM10 values by district", 
+       subtitle = "November 2018",
+       x = "" ,
+       caption =   "Source: https://powietrze.gios.gov.pl/pjp/content/annual_assessment_air_target_level",
+       y= expression(PM[10]~(mu*g/m^3))) + 
+  geom_hline(yintercept=40, linetype="dashed", color = "red")+ theme(legend.position = "none")+ 
+  geom_text(x = 8, y = 42, label = "Critical value", color = 'red')
+  
+ ggplot(data = air_quality_Nov, aes(y = O3.Value, x = Station2, color = Station2)) +
+  geom_boxplot(varwidth = TRUE) + 
+  scale_y_continuous(limits = c(0 , 130), 
+                     breaks = seq(0,130 , 10)) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(title = "O3 values by district", 
+       caption =   "Source: https://powietrze.gios.gov.pl/pjp/content/annual_assessment_air_target_level",
+       subtitle = "November 2018",
+       x = "" ,
+      
+       y= expression(O[3]~(mu*g/m^3)))  + 
+  geom_hline(yintercept=120, linetype="dashed", color = "red")+ theme(legend.position = "none")+ 
+  geom_text(x = 8, y = 125, label = "Critical value", color = 'red')
+  
+
+  
+```
+
+
+
+
+
+
