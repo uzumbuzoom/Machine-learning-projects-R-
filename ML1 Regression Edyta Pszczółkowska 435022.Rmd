@@ -1,0 +1,1457 @@
+---
+title: "Regression project - predicting developers salary"
+author: "Edyta Pszczółkowska"
+date: "05 09 2021"
+output: html_document
+---
+
+
+The presented project is a regression model based on the dataset obtained through a survey conducted among StackOverflow portal users.
+I will try to predict yearly income in US dollars with 31 explanatory variables of different type (numeric, ordinal, discrete and binary) concerning the responents' basic demographic traits and answers to questions about their skills or career path.
+3 methods will be implemented: ordinary least square model, k-nearest neighbors algorithm and random forests.
+As the conclusion I will summarize and compare basic performance measures of the models.
+
+Such a model may be very useful especially for people who consider their future carrier path in IT industry. It may also explain the differences and indicate more valuable skills and knowledge of particular programming languages or frameworks which determine better developer's earnings.
+
+A long journey ahead of us, let us start!
+
+
+
+###Loading the data and necessary packages...
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+data <- read.csv("D:\\Edyta pliki\\DS\\II semestr\\ML1\\survey_results_public.csv")
+
+
+
+
+
+library(dplyr)
+library(readr)
+library(ggplot2)
+
+library(caret)
+library(dplyr)
+library(tibble)
+library(purrr)
+library(corrplot)
+library(DescTools)
+library(olsrr)
+
+
+library(verification)
+library(janitor)
+library(class)
+
+library(ranger)
+```
+
+
+
+##Removing unnecessary variables and handling NAs
+
+The dataset is huge and has a lot of missing data. Therefore I will start ETL process by deleting unnecessary variables and afterwards look for the records which have too much NAs. 
+
+
+In the first step let's remove the cases with NAs in the dependent variable which is "ConvertedComp" (reduction of cases by almost 50%)...
+
+```{r }
+data <- data[!is.na(data$ConvertedComp),]
+
+
+```
+
+
+
+
+... and also remove the columns which represent answers to the survey questions about using StackOverflow and regarding survey itself:
+
+```{r}
+
+data <- data[ , -which(names(data) %in% c("SurveyEase", "SurveyLength", "SOComm", "SOPartFreq",   "SOVisitFreq", "SOAccount", "NEWSOSites",  "WelcomeChange", "NEWOtherComms", "NEWOffTopic" ))]
+
+```
+
+
+
+
+I will also delete couple of variables storing answers to multiple choice questions, which are not that much significant in terms of determining developers salary and in the same time would be very problematic to decode all their possible answers into binary types. These are:
+
+
+
+**In general, what drives you to look for a new job? Select all that apply** (12 options to choose from)
+
+
+
+**When job searching, how do you learn more about a company? Select all that apply.** (6 options to choose from)
+
+
+
+**Imagine that you are deciding between two job offers with the same compensation, benefits, and location. Of the following factors, which 3 are MOST important to you?** (11 options to choose from)
+
+
+
+**When buying a new tool or software, how do you discover and research available solutions? Select all that apply.** (6 options to choose from, almost half of the answers empty)
+
+
+
+**What do you do when you get stuck on a problem? Select all that apply.** (8 options to choose from)
+
+
+**You search for a coding solution online and the first result link is purple because you already visited it. How do you feel?** (4 options to choose from)
+
+
+
+
+```{r}
+
+data$NEWJobHunt <- NULL
+data$NEWJobHuntResearch <- NULL
+data$JobFactors <- NULL
+data$NEWPurchaseResearch <- NULL
+data$NEWStuck <- NULL
+data$NEWPurpleLink <- NULL
+```
+
+
+And there is also set of questions which refer to the company of the developer rather than to him/her and to their skills:
+
+
+**Do you think your company has a good onboarding process? (By onboarding, we mean the structured process of getting you settled in to your new role at a company)**
+
+
+**Does your company have a dedicated DevOps person?**
+
+
+
+**How important is the practice of DevOps to scaling software development?**
+
+
+```{r}
+data$NEWOnboardGood <- NULL
+data$NEWDevOpsImpt <- NULL
+data$NEWDevOps <- NULL
+```
+
+
+
+**Which currency do you use day-to-day? If your answer is complicated, please pick the one you're most comfortable estimating in.**
+
+```{r}
+length(table(data$CurrencyDesc))
+```
+As there would be 128 levels of this variable, I will  delete this variable (and also parallel column with currency symbols)  - information about country is fair enough (e.g. in case of countries in euro zone it is much better for all of 19 of them to know the country instead of the currency) :
+
+
+```{r}
+
+data$CurrencySymbol <- NULL
+data$CurrencyDesc <- NULL
+```
+
+
+**What is your current total compensation (salary, bonuses, and perks, before taxes and deductions), in $? Please enter a whole number in the box below, without any punctuation. If you are paid hourly, please estimate an equivalent weekly, monthly, or yearly salary. If you prefer not to answer, please leave the box empty.**
+
+**Is that compensation weekly, monthly, or yearly?**
+
+Those two questions represent columns represent variables  "CompFrequency" and "CompTotal" which were used to create the dependent variable "ConvertedComp", therefore are not needed anymore:
+
+```{r}
+
+data$CompFreq <- NULL
+data$CompTotal <- NULL
+```
+
+
+And now let's have a look how many missing variables there are in every remaining column:
+
+
+```{r}
+colSums(is.na(data)) %>% 
+  sort()
+```
+
+
+Let's delete the most 5 incomplete variables (those variables have at least 25% of NAs, questions about experience in working with webframes and other mixed-category tools):
+
+
+```{r}
+
+
+data$MiscTechDesireNextYear <- NULL
+data$MiscTechWorkedWith <- NULL
+data$WebframeDesireNextYear <- NULL
+data$WebframeWorkedWith <- NULL
+data$DatabaseDesireNextYear <- NULL
+```
+
+And in the end of this part of the process I will sum up all NAs for each of the row and delete the most mysterious ones (and most useless in the same time):
+
+
+
+```{r}
+data$NAs <-rowSums(is.na(data))
+  
+table(data$NAs)
+
+length(data$Respondent[data$NAs >10])
+```
+
+There are 1264 records which lack of answers to more than 10 out of 34 left questions/variables. As the dataset is big enough for the models, I will let them go:
+
+```{r}
+data <- data[data$NAs < 11, ]
+table(data$NAs)
+data$NAs <- NULL
+
+```
+
+
+
+
+Now my dataset is clear enough to work with, great.
+
+
+##Preparation of the variables
+
+Now I will inspect all the remaining variables which store the answers to the survey's question (with the same order they were put in the survey). 
+
+**Which of the following options best describes you today? Here, by "developer" we mean "someone who writes code.**
+
+
+```{r}
+table(data$MainBranch)
+data$MainBranch <- as.factor(data$MainBranch)
+sum(is.na(data$MainBranch))
+```
+OK! Nothing to do more with this variable
+
+
+**SURVEY QUESTION: Do you code as a hobby?**
+
+```{r}
+table(data$Hobbyist)
+data$Hobbyist <- as.factor(data$Hobbyist)
+sum(is.na(data$Hobbyist))
+```
+Well, given the number of professional developers it is a huge a surprise to have so many hobbyist in a dataset. Maybe forthcoming variables will give an answer to this puzzle...
+
+
+
+**Which of the following best describes your current employment status?**
+
+```{r}
+
+table(data$Employment)
+
+sum(is.na(data$Employment))
+
+```
+
+
+As all the other groups (including NA) are fairly small in comparison to respondents working full time, I will make this variable binary by dividing the sample into "employed full-time" and all the other:
+
+```{r}
+
+data$Employment[is.na(data$Employment)] <- "Other"
+
+data$Employment[!(data$Employment) == "Employed full-time"] <- "Other"
+
+table(data$Employment)
+data$Employment <- as.factor(data$Employment)
+```
+
+
+**Where do you live?** 
+
+```{r}
+sort(table(data$Country))
+```
+
+
+Besides grouping the countries by continents/parts of the world, I will also divide them accoriding to their economy status. This is reasonable since the countries vary significantly in terms of development even if they are neighbors to each other (like South and North Korea). 
+
+Therefore I downloaded the most recent dataset of countries divided into 4 groups by their gross national income per capita (GNI per capita):
+
+
+1. LOW-INCOME ECONOMIES ($1,045 OR LESS) 
+2. LOWER-MIDDLE INCOME ECONOMIES ($1,046 TO $4,095)  
+3. UPPER-MIDDLE-INCOME ECONOMIES ($4,096 TO $12,695) 
+4. HIGH-INCOME ECONOMIES ($12,696 OR MORE) 
+
+The same dataset contains also the division of the countries by parts of the world:
+
+1. East Asia and Pacific	
+2. Europe and Central Asia	
+3. Latin America & the Caribbean	
+4. Middle East and North Africa		
+5. North America		
+6. South Asia		
+7. Sub-Saharan Africa
+
+The source: 
+https://datahelpdesk.worldbank.org/knowledgebase/articles/906519-world-bank-country-and-lending-groups
+
+
+
+To merge those two datasets I have to unify the countries names, which was the most horrible thing I had to do to prepare the data (but now at least I  know there is such a country like Eswatini/ Swaziland).
+
+```{r}
+countries_division <- read.csv("D:\\Edyta pliki\\DS\\II semestr\\ML1\\Countries.csv")
+
+
+
+
+data$Country[data$Country == "Swaziland"] <- "Eswatini"
+data$Country[data$Country == "Bahamas"] <- "Bahamas, The"
+data$Country[data$Country == "Democratic Republic of the Congo"] <- "Congo, Dem. Rep."
+data$Country[data$Country == "Egypt"] <- "Egypt, Arab Rep."
+data$Country[data$Country == "Hong Kong (S.A.R.)"] <- "Hong Kong SAR, China"
+data$Country[data$Country == "Viet Nam"] <- "Vietnam"
+data$Country[data$Country == "United Republic of Tanzania"] <- "Tanzania"
+data$Country[data$Country == "Iran"] <- "Iran, Islamic Rep."
+data$Country[data$Country == "Venezuela, Bolivarian Republic of..."] <- "Venezuela, RB"
+data$Country[data$Country == "Lao People's Democratic Republic"] <- "Lao PDR"
+data$Country[data$Country == "Republic of Korea"] <- "Korea, Dem. People's Rep."
+data$Country[data$Country == "South Korea"] <- "Korea, Rep."
+data$Country[data$Country == "Kyrgyzstan"] <- "Kyrgyz Republic"
+data$Country[data$Country == "Saint Vincent and the Grenadines"] <- "St. Vincent and the Grenadines"
+data$Country[data$Country == "Republic of Moldova"] <- "Moldova"
+data$Country[data$Country == "Slovakia"] <- "Slovak Republic"
+data$Country[data$Country == "Taiwan"] <- "Taiwan, China"
+data$Country[data$Country == "Yemen"] <- "Yemen, Rep."
+data$Country[data$Country == "The former Yugoslav Republic of Macedonia"] <- "North Macedonia"
+
+
+data  <- merge(data, countries_division, by.x = "Country", by.y = "Economy" , all.x = T)
+
+
+
+
+
+table(data$Income.group)
+
+
+
+
+
+```
+
+
+
+As the low income group is very small in comparison to the other ones, I will merge "low income" and "Lower middle income" into one group ("low income").
+I will also assign proper order to the income levels.
+
+```{r}
+data$Income.group[data$Income.group == "Lower middle income"] <- "Low income"
+
+data$Income.group <- factor(data$Income.group,  levels = c("Low income", "Upper middle income","High income"  ),  ordered = TRUE)
+```
+
+
+The mysterious 36 respondents without income group are from Venezuela (missing data in the downloaded table), I will assign them to low income countries on my own:
+
+```{r}
+data$Income.group[data$Country == "Venezuela, RB"] <- "Low income"
+table(data$Income.group)
+
+```
+```{r}
+table(data$Region)
+```
+
+
+Sub-Saharan Africa and Middle East & North Africa are both relatively small in comparison to remaining groups therefore will be also merged:
+
+```{r}
+
+data$Region[data$Region == "Sub-Saharan Africa" | data$Region == "Middle East & North Africa"] <- "Africa"
+data$Region <- as.factor(data$Region)
+
+table(data$Region)
+
+
+```
+```{r}
+sum(is.na(data$Income.group))
+sum(is.na(data$Region))
+```
+
+
+The remaining 14 NAs in  variable "region" and "income.group", are the respondents who answered they come from "nomadic" areas.
+I assume it must be some low income african territory, so I will put them into proper groups:
+
+```{r}
+data$Region[data$Country == "Nomadic"] <- "Africa"
+data$Income.group[data$Country == "Nomadic"] <- "Low income"
+data$Country <- NULL
+
+
+sum(is.na(data$Region))
+sum(is.na(data$Income.group))
+
+```
+
+**Which of the following best describes the highest level of formal education that you’ve completed?**
+
+
+```{r}
+table(data$EdLevel)
+sum(is.na(data$EdLevel))
+```
+
+I will rearrange the levels of this variable to make analysis more clear. I will also assign proper order of the levels:
+
+
+
+1st  (lowest) level: No edu/primary/secondary/NAs
+
+NAs
+I never completed any formal education 
+Primary/elementary school
+Secondary school (e.g. American high school, German Realschule or Gymnasium, etc.) 
+
+2nd level: associate/without degree
+
+Associate degree (A.A., A.S., etc.) 
+Some college/university study without earning a degree
+
+3rd level: completed degree
+
+Bachelorâ€™s degree (B.A., B.S., B.Eng., etc.)
+Masterâ€™s degree (M.A., M.S., M.Eng., MBA, etc.)
+Professional degree (JD, MD, etc.)
+Other doctoral degree (Ph.D., Ed.D., etc.)
+ 
+
+
+```{r}
+data$EdLevel[data$EdLevel == "I never completed any formal education"] <- "1-No edu/primary/secondary/NAs"
+data$EdLevel[data$EdLevel == "Primary/elementary school"] <- "1-No edu/primary/secondary/NAs"
+data$EdLevel[data$EdLevel == "Secondary school (e.g. American high school, German Realschule or Gymnasium, etc.)"] <- "1-No edu/primary/secondary/NAs"
+data$EdLevel[is.na(data$EdLevel)] <- "1-No edu/primary/secondary/NAs"
+
+
+
+data$EdLevel[data$EdLevel == "Associate degree (A.A., A.S., etc.)"] <- "2-associate/without degree"
+data$EdLevel[data$EdLevel == "Some college/university study without earning a degree"] <- "2-associate/without degree"
+
+
+data$EdLevel[data$EdLevel == "Bachelorâ€™s degree (B.A., B.S., B.Eng., etc.)"] <- "3-completed degree"
+data$EdLevel[data$EdLevel == "Masterâ€™s degree (M.A., M.S., M.Eng., MBA, etc.)"] <- "3-completed degree"
+data$EdLevel[data$EdLevel == "Other doctoral degree (Ph.D., Ed.D., etc.)"] <- "3-completed degree"
+data$EdLevel[data$EdLevel == "Professional degree (JD, MD, etc.)"] <- "3-completed degree"
+
+
+table(data$EdLevel)
+
+data$EdLevel <- factor(data$EdLevel,
+                           # levels from lowest to highest
+                           levels = c("1-No edu/primary/secondary/NAs", "2-associate/without degree","3-completed degree"  ),  ordered = TRUE)
+
+
+```
+
+
+**What was your primary field of study?**
+
+```{r}
+
+table(data$UndergradMajor)
+```
+
+I will divide this group into those with IT formal background and not:
+
+```{r}
+
+
+data$UndergradMajor[data$UndergradMajor %in%  c("Web development or web design", "Information systems, information technology, or system administration", "Computer science, computer engineering, or software engineering") ]  <- "IT Background"
+
+data$UndergradMajor[!data$UndergradMajor == "IT Background"] <- "other"
+data$UndergradMajor[is.na(data$UndergradMajor)] <- "other"
+
+
+
+data$UndergradMajor <- as.factor(data$UndergradMajor)
+table(data$UndergradMajor)
+sum(is.na(data$UndergradMajor))
+
+```
+
+```{r}
+colSums(is.na(data)) %>% 
+  sort()
+```
+
+
+**How important is a formal education, such as a university degree in computer science, to your career?**
+
+
+```{r}
+table(data$NEWEdImpt)
+sum(is.na(data$NEWEdImpt))
+```
+
+This is an order variable. I will lower the number of options and assign proper order of levels:
+
+
+```{r}
+
+
+
+data$NEWEdImpt[is.na(data$NEWEdImpt)] <- "Not at all important/not necessary/NA"
+data$NEWEdImpt[data$NEWEdImpt == "Not at all important/not necessary"] <- "Not at all important/not necessary/NA"
+
+data$NEWEdImpt[data$NEWEdImpt == "Somewhat important"] <- "Somewhat important/Fairly important"
+data$NEWEdImpt[data$NEWEdImpt == "Fairly important"] <- "Somewhat important/Fairly important"
+
+data$NEWEdImpt[data$NEWEdImpt == "Very important"] <- "Very/Critically important"
+data$NEWEdImpt[data$NEWEdImpt == "Critically important"] <- "Very/Critically important"
+
+
+data$NEWEdImpt <- factor(data$NEWEdImpt,
+                           levels = c("Not at all important/not necessary/NA", "Somewhat important/Fairly important", "Very/Critically important"  ),  ordered = TRUE)
+table(data$NEWEdImpt)
+sum(is.na(data$NEWEdImpt))
+
+```
+
+
+**Which of the following describe you? Please select all that apply.**
+
+
+```{r}
+head(data$DevType, 10)
+```
+
+Here the respondents had 23 options to choose from. As the only way to decode their answers would be creating 23 dummy variables for each of the alternative, it would introduce a huge chaos in the models. 
+Therefore I will add a variable, which corresponds to the number of options the respondents marked. The more options they marked, the more areas of IT they specialize in. I will achieve this by counting the numbers of semicolon signs (;) which separates consecutive element of the set and add one. I will use the "str_count" function from the package "stringr". Afterwards I delete all unnecessary columns:
+
+
+```{r}
+library(stringr)
+data$DevType_count <- str_count(data$DevType, ";") + 1
+
+data$DevType <- NULL
+sum(is.na(data$DevType_count))
+table(data$DevType_count)
+
+```
+
+I don't know to which extent may I trust the respondents claiming to specialize in almost every IT area, especially those who in the same time claim to code professionally less than one year (?!). The 17 most dubious cases with checked more than 17 options  will be deleted as serious outliers.
+Moreover, there are  also 354 NAs, let's  impute the median of remaining variables:
+
+
+
+
+
+```{r}
+
+data$DevType_count[is.na(data$DevType_count)] <- median(data$DevType_count < 18,  na.rm = TRUE)
+
+data <- data[data$DevType_count < 18, ]
+table(data$DevType_count)
+```
+
+
+
+
+ANd let us see a distribution of the variable:
+
+```{r}
+ggplot(data,
+       aes(x = (DevType_count))) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+
+
+
+```
+
+
+**How satisfied are you with your current job? (If you work multiple jobs, answer for the one you spend the most hours on.)**
+
+This variable is the order one, let's arrange the proper values to its proper place in order:
+
+```{r}
+table(data$JobSat)
+sum(is.na(data$JobSat))
+
+ 
+```
+
+As the number of people who gave no answer to this question is low, I will combine the neutral category and the NAs into "Neither satisfied nor dissatisfied/NAs" , all satisfied and dissatisfied (more and less) will be also merged  together and afterwards assign proper order of the values will be assigned:
+
+
+```{r}
+data$JobSat[is.na(data$JobSat)] <- "Neither satisfied nor dissatisfied/NAs"
+data$JobSat[data$JobSat == "Neither satisfied nor dissatisfied"] <- "Neither satisfied nor dissatisfied/NAs"
+data$JobSat[data$JobSat == "Very dissatisfied"] <- "Dissatisfied"
+data$JobSat[data$JobSat == "Slightly dissatisfied"] <- "Dissatisfied"
+data$JobSat[data$JobSat == "Slightly satisfied"] <- "Satisfied"
+data$JobSat[data$JobSat == "Very satisfied"] <- "Satisfied"
+
+
+
+data$JobSat <- factor(data$JobSat, levels = c("Dissatisfied", "Neither satisfied nor dissatisfied/NAs", "Satisfied"  ),  ordered = TRUE)
+
+table(data$JobSat)
+sum(is.na(data$JobSat))
+```
+
+
+
+
+
+**Approximately how many people are employed by the company or organization you currently work for?**
+
+This is an order variable, therefore I will set proper level order, but before combine NAs and freelancers into one, lowest group and make the number of options smaller:
+
+
+```{r}
+table(data$OrgSize)
+sum(is.na(data$OrgSize))
+
+
+
+data$OrgSize[is.na(data$OrgSize)] <- "freelancer/NAs"
+data$OrgSize[data$OrgSize == "Just me - I am a freelancer, sole proprietor, etc."] <- "freelancer/NAs"
+
+data$OrgSize[data$OrgSize == "2 to 9 employees"] <- "up to 99 employees"
+data$OrgSize[data$OrgSize == "10 to 19 employees"  ] <- "up to 99 employees"
+data$OrgSize[data$OrgSize == "20 to 99 employees"  ] <- "up to 99 employees"
+
+data$OrgSize[data$OrgSize == "100 to 499 employees"] <- "100 to 999 employees"
+data$OrgSize[data$OrgSize == "500 to 999 employees"] <- "100 to 999 employees"
+
+data$OrgSize[data$OrgSize == "1,000 to 4,999 employees"] <- "more than 1000 employees"
+data$OrgSize[ data$OrgSize == "5,000 to 9,999 employees"  ] <- "more than 1000 employees"
+data$OrgSize[data$OrgSize == "10,000 or more employees"  ] <- "more than 1000 employees"
+
+data$OrgSize <- factor(data$OrgSize, levels = c("freelancer/NAs", "up to 99 employees", "100 to 999 employees", "more than 1000 employees" ),  ordered = TRUE) 
+
+
+table(data$OrgSize)
+sum(is.na(data$OrgSize))
+
+```
+
+
+
+
+**On average, how many hours per week do you work? Please enter a whole number in the box.**
+
+```{r}
+
+ggplot(data,
+       aes(x = (WorkWeekHrs))) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+```
+What an imagination! As the whole week has  24*7 = 168 hours, I propose to censor the answers to maximum 112  (112 hours per week means working 16 hours per day) and replace NAs with the median value (firstly let's check how many of them there are in the dataset):
+
+```{r}
+length(data$Respondent[data$WorkWeekHrs > 112])
+sum(is.na(data$WorkWeekHrs))
+median(data$WorkWeekHrs[data$WorkWeekHrs < 113], na.rm = TRUE)
+
+data$WorkWeekHrs[data$WorkWeekHrs > 113 ] <- 112
+
+data$WorkWeekHrs[ is.na(data$WorkWeekHrs) ] <- median(data$WorkWeekHrs, na.rm = TRUE)
+```
+Let's check the distribution again:
+
+```{r}
+ggplot(data,
+       aes(x = (WorkWeekHrs))) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+
+
+
+```
+
+
+
+**How often do you work overtime or beyond the formal time expectation of your job?**
+
+```{r}
+table(data$NEWOvertime)
+sum(is.na(data$NEWOvertime))
+
+```
+
+
+It is an order variable, so the levels must be ordered and their number limited:
+
+
+```{r}
+
+
+
+
+data$NEWOvertime[is.na(data$NEWOvertime)] <- "Unknown/Never/Rarely"
+data$NEWOvertime[data$NEWOvertime == "Never"] <- "Unknown/Never/Rarely"
+data$NEWOvertime[data$NEWOvertime == "Rarely: 1-2 days per year or less"] <- "Unknown/Never/Rarely"
+
+data$NEWOvertime[data$NEWOvertime == "Occasionally: 1-2 days per quarter but less than monthly"] <- "Occasionally/Sometimes"
+data$NEWOvertime[data$NEWOvertime == "Sometimes: 1-2 days per month but less than weekly"] <- "Occasionally/Sometimes"
+
+data$NEWOvertime <- factor(data$NEWOvertime, levels = c("Unknown/Never/Rarely","Occasionally/Sometimes" , "Often: 1-2 days per week or more" ),  ordered = TRUE)
+
+
+table(data$NEWOvertime)
+sum(is.na(data$NEWOvertime))
+```
+
+
+
+
+
+
+
+**Which of the following best describes your current job-seeking status?**
+
+```{r}
+
+
+table(data$JobSeek)
+sum(is.na(data$JobSeek))
+
+
+```
+For NAs we need special category:
+
+```{r}
+
+data$JobSeek[is.na(data$JobSeek)] <- "Unknown"
+
+
+
+table(data$JobSeek)
+sum(is.na(data$JobSeek))
+data$JobSeek <- as.factor(data$JobSeek)
+```
+
+
+
+**How frequently do you learn a new language or framework?**
+
+Ordinal variable, which must be put in proper order of levels:
+
+```{r}
+
+table(data$NEWLearn)
+sum(is.na(data$NEWLearn))
+
+
+data$NEWLearn[is.na(data$NEWLearn)] <- "Unknown"
+
+data$NEWLearn <- factor(data$NEWLearn, levels = c("Unknown" , "Once a decade", "Once a year", "Once every few years", "Every few months"), ordered = TRUE)
+
+table(data$NEWLearn)
+sum(is.na(data$NEWLearn))
+
+```
+
+**Which database environments have you done extensive development work in over the past year, and which do you want to work in over the next year? (If you both worked with the database and want to continue to do so, please check both boxes in that row.)** (14 options)
+
+
+**Which programming, scripting, and markup languages have you done extensive development work in over the past year, and which do you want to work in over the next year? (If you both worked with the language and want to continue to do so, please check both boxes in that row.)** (23 options)
+
+
+**Which platforms have you done extensive development work in over the past year, and which do you want to work in over the next year? (If you both worked with the platform and want to continue to do so, please check both boxes in that row.)** (16 options)
+
+
+**Which collaboration tools have you done extensive development work in over the past year, and which do you want to work in over the next year? (If you worked with the tool and want to continue to do so, please check both boxes in that row.)**(12 options)
+
+
+The same story as before: creating dummy variables for all of them would be a data science student nightmare. I will use the same trick as before with kinds of developers, the same way I will keep a very valuable information: how wide the skills portfolio of a particular developer is and how ambitious they are about learning new things:
+
+
+```{r}
+
+data$DatabaseWorkedWith_count <- str_count(data$DatabaseWorkedWith, ";") +1
+data$DatabaseWorkedWith <- NULL
+
+table(data$DatabaseWorkedWith_count)
+sum(is.na(data$DatabaseWorkedWith_count))
+
+
+```
+
+Let's replace NAs with median values:
+
+```{r}
+
+
+
+data$DatabaseWorkedWith_count[is.na(data$DatabaseWorkedWith_count)] <- median(data$DatabaseWorkedWith_count, na.rm = TRUE)
+
+```
+
+```{r}
+data$LanguageDesireNextYear_count <- str_count(data$LanguageDesireNextYear, ";") +1
+data$LanguageDesireNextYear <- NULL
+
+
+table(data$LanguageDesireNextYear_count)
+sum(is.na(data$LanguageDesireNextYear_count))
+
+data$LanguageWorkedWith_count <- str_count(data$LanguageWorkedWith, ";") +1
+data$LanguageWorkedWith <- NULL
+
+
+table(data$LanguageWorkedWith_count)
+sum(is.na(data$LanguageWorkedWith_count))
+```
+
+
+Let's replace NAs with median values:
+
+```{r}
+data$LanguageDesireNextYear_count[is.na(data$LanguageDesireNextYear_count)] <- median(data$LanguageDesireNextYear_count, na.rm = TRUE)
+
+data$LanguageWorkedWith_count[is.na(data$LanguageWorkedWith_count)] <- median(data$LanguageWorkedWith_count, na.rm = TRUE)
+
+
+```
+
+```{r}
+data$NEWCollabToolsDesireNextYear_count <- str_count(data$NEWCollabToolsDesireNextYear, ";") +1
+data$NEWCollabToolsDesireNextYear <- NULL
+
+table(data$NEWCollabToolsDesireNextYear_count)
+sum(is.na(data$NEWCollabToolsDesireNextYear_count))
+
+data$NEWCollabToolsWorkedWith_count <- str_count(data$NEWCollabToolsWorkedWith, ";") +1
+data$NEWCollabToolsWorkedWith <- NULL
+
+
+table(data$NEWCollabToolsWorkedWith_count)
+sum(is.na(data$NEWCollabToolsWorkedWith_count))
+
+```
+
+Let's replace NAs with median values:
+
+```{r}
+data$NEWCollabToolsDesireNextYear_count[is.na(data$NEWCollabToolsDesireNextYear_count)] <- median(data$NEWCollabToolsDesireNextYear_count, na.rm = TRUE)
+data$NEWCollabToolsWorkedWith_count[is.na(data$NEWCollabToolsWorkedWith_count)] <- median(data$NEWCollabToolsWorkedWith_count, na.rm = TRUE)
+```
+
+```{r}
+
+data$PlatformDesireNextYear_count <- str_count(data$PlatformDesireNextYear, ";") +1
+data$PlatformDesireNextYear <- NULL
+
+
+table(data$PlatformDesireNextYear_count)
+sum(is.na(data$PlatformDesireNextYear_count))
+
+data$PlatformWorkedWith_count <- str_count(data$PlatformWorkedWith, ";") +1
+data$PlatformWorkedWith <- NULL
+
+
+table(data$PlatformWorkedWith_count)
+sum(is.na(data$PlatformWorkedWith_count))
+```
+
+
+
+
+Let's replace NAs with median values:
+
+```{r}
+data$PlatformDesireNextYear_count[is.na(data$PlatformDesireNextYear_count)] <- median(data$PlatformDesireNextYear_count, na.rm = TRUE)
+data$PlatformWorkedWith_count[is.na(data$PlatformWorkedWith_count)] <- median(data$PlatformWorkedWith_count, na.rm = TRUE)
+
+```
+
+
+
+
+
+**What is the primary operating system in which you work?**
+
+```{r}
+table(data$OpSys)
+sum(is.na(data$OpSys))
+
+```
+
+I will combine BSD and NAs into one group:
+
+
+```{r}
+data$OpSys[data$OpSys == "BSD"] <- "BSD/Unknown"
+
+data$OpSys[is.na(data$OpSys)]  <- "BSD/Unknown"
+
+
+table(data$OpSys)
+sum(is.na(data$OpSys))
+
+data$OpSys <- as.factor(data$OpSys)
+```
+
+
+
+**What level of influence do you, personally, have over new technology purchases at your organization?**
+
+Ordinal value, let's rearrange the order:
+
+```{r}
+table(data$PurchaseWhat)
+sum(is.na(data$PurchaseWhat))
+
+data$PurchaseWhat[is.na(data$PurchaseWhat)] <- "Unknown"
+data$PurchaseWhat <- factor(data$PurchaseWhat, levels = c("Unknown", "I have little or no influence", "I have some influence", "I have a great deal of influence"), ordered = TRUE)
+```
+
+
+
+
+And now pure demographic questions:
+
+**Which of the following describe you, if any? Please check all that apply. If you prefer not to answer, you may leave this question blank.**
+
+```{r}
+table(data$Gender)
+sum(is.na(data$Gender))
+```
+
+I will combine this varibale into 3 groups: man, woman and other (including NAs):
+```{r}
+data$Gender[data$Gender == "Man;Non-binary, genderqueer, or gender non-conforming"] <- "other"
+data$Gender[data$Gender == "Non-binary, genderqueer, or gender non-conforming"] <- "other"
+data$Gender[data$Gender == "Woman;Man"] <- "other"
+data$Gender[data$Gender == "Woman;Man;Non-binary, genderqueer, or gender non-conforming"] <- "other"
+data$Gender[data$Gender == "Woman;Non-binary, genderqueer, or gender non-conforming"] <- "other"
+data$Gender[is.na(data$Gender)] <- "other"
+
+table(data$Gender)
+sum(is.na(data$Gender))
+data$Gender <- as.factor(data$Gender)
+
+```
+
+**Are you transgender? **
+
+
+
+```{r}
+table(data$Trans)
+sum(is.na(data$Trans))
+
+
+```
+As only 0,7% (near zero variance) respondents claim to be transsexual and there is a huge amount if NAs in  this variable I will drop this column:
+
+```{r}
+data$Trans <- NULL
+```
+
+**Which of the following describe you, if any? Please check all that apply. If you prefer not to answer, you may leave this question blank. **
+
+
+
+```{r}
+table(data$Sexuality)
+```
+
+As there are a lot of contradictory answers (like 170 people claim to be bisexual and straight in the same time), then I will divide respondets to those who claim to be straight and those who marked any other answer, including NA:
+
+
+
+```{r}
+data$Sexuality[!data$Sexuality == "Straight / Heterosexual"] <- "other"
+data$Sexuality[is.na(data$Sexuality )] <- "other"
+table(data$Sexuality)
+
+data$Sexuality <- as.factor(data$Sexuality)
+```
+
+**Which of the following describe you, if any? Please check all that apply. If you prefer not to answer, you may leave this question blank.**
+
+```{r}
+head(data$Ethnicity, 30)
+```
+
+
+This was again multiple choice question with 13 options available. The same story - creating dummy variables for all of them would be chaotic. In this case we will have to satisfy ourselves with the variable "country" although it is not the same (one can live in US, but come from Asia).
+Nevertheless, let's delete this column:
+
+```{r}
+data$Ethnicity <- NULL
+
+```
+
+
+
+Two questions regarding age:
+
+**What is your age (in years)?**
+
+**At what age did you write your first line of code or program? (e.g., webpage, Hello World, Scratch project)**
+
+
+
+
+```{r}
+class(data$Age)
+sum(is.na(data$Age))
+head(sort(data$Age), 25)
+tail(sort(data$Age), 25)
+
+```
+
+
+We cannot know to what extent can we trust the data from respondents claiming to be younger than 18 and older than 65, some of them claim to be full time workers earning 2.000.000 USD with 6 years of experience. As the dataset is huge enough, I can let myself delete those records. 
+
+In the same step I will assign value "Unknown" for the NAs and bin the variable - usually the relationship between age  and other variables is nonlinear. Discretization (binning) can help both with reducing the problem of overfitting and modelling nonlinear relationships. Let's do it:
+
+```{r}
+
+data$Age[is.na(data$Age)] <- "Unknown"
+data <- data[data$Age > 18 & data$Age < 75 | data$Age == "Unknown" , ]
+
+
+data$Age <- ifelse(data$Age == "Unknown", "Unknown",
+              ifelse(data$Age < 26, "student", 
+                   ifelse(data$Age >=26 & data$Age < 35 , "young-wolf", "middle-aged")))
+
+data$Age <- factor(data$Age, levels = c("Unknown", "student", "young-wolf", "middle-aged" ), ordered = TRUE)
+
+
+
+
+sum(is.na(data$Age))
+table(data$Age)
+```
+
+
+
+
+
+
+
+
+
+
+Age while starting to code:
+
+```{r}
+table(data$Age1stCode)
+sum(is.na(data$Age1stCode))
+
+```
+
+
+To make this variable a numeric one needs to convert the answer "Younger than 5 years" into numeric one, let's censor this data by assuming that those people were 4 y.o. by that time, change class of variable into numeric and impute median into NAs:
+
+```{r}
+data$Age1stCode[data$Age1stCode == "Younger than 5 years"] <- 4
+data$Age1stCode <- as.numeric(data$Age1stCode)
+data$Age1stCode[is.na(data$Age1stCode)] <- median(data$Age1stCode, na.rm =  TRUE)
+class(data$Age1stCode)
+```
+
+And let us see the distribution of this variable:
+
+
+```{r}
+ggplot(data,
+       aes(x = (Age1stCode))) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw() 
+
+
+
+```
+
+
+Let us focus on years of coding:
+
+
+
+**Including any education, how many years have you been coding in total?**
+
+
+
+```{r}
+table(data$YearsCode)
+sum(is.na(data$YearsCode))
+```
+
+
+Let's convert it into numerical one by censoring the data again, change NAs into median value and plot the distribution:
+
+
+```{r}
+data$YearsCode[data$YearsCode == "Less than 1 year"] <- 0
+data$YearsCode[data$YearsCode == "More than 50 years"] <- 51
+data$YearsCode <- as.numeric(data$YearsCode)
+data$YearsCode[is.na(data$YearsCode)] <- median(data$YearsCode, na.rm =  TRUE)
+```
+
+
+```{r}
+ggplot(data,
+       aes(x = (YearsCode))) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+
+
+```
+
+
+
+**NOT including education, how many years have you coded professionally (as a part of your work)?**
+
+
+```{r}
+table(data$YearsCodePro)
+```
+
+
+I will censor the data just like previously, change NAs to median and plot the distribution:
+
+```{r}
+data$YearsCodePro[data$YearsCodePro == "Less than 1 year"] <- 0
+data$YearsCodePro[data$YearsCodePro == "More than 50 years"] <- 51
+data$YearsCodePro <- as.numeric(data$YearsCodePro)
+data$YearsCodePro[is.na(data$YearsCodePro)] <- median(data$YearsCodePro, na.rm =  TRUE)
+
+```
+
+
+
+```{r}
+ggplot(data,
+       aes(x = (YearsCodePro))) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+
+
+
+
+```
+
+
+I will make sure that there are no left NAs:
+
+```{r}
+colSums(is.na(data)) %>% 
+  sort()
+```
+
+And also see the summary of all the variables to make sure all of them have proper form (factor/count/binary):
+
+```{r}
+summary(data)
+```
+
+Let's divide the explanatory variables into numeric and factor ones:
+
+```{r}
+data_numeric_vars <- 
+  sapply(data, is.numeric) %>% 
+  which() %>% 
+  names()
+
+data_numeric_vars
+
+```
+
+```{r}
+
+data_factor_vars <- 
+  sapply(data, is.factor) %>% 
+  which() %>% 
+  names()
+
+data_factor_vars
+
+```
+
+
+###Dependent variable
+
+Once the explanatory variables are neat and tidy, let us focus on the dependent variable:
+
+```{r}
+
+ggplot(data,
+       aes(x = (ConvertedComp))) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+
+
+```
+
+The data is highly skewed. Moreover, there are a lot of misleading records(outliers). I will exclude the most unbelievable ones and check again the distribution of the variable both in normal and log form:
+
+```{r}
+data <- data[data$ConvertedComp > 500 & data$ConvertedComp < 500000,]
+
+
+
+ggplot(data,
+       aes(x = (ConvertedComp))) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+
+
+
+ggplot(data,
+       aes(x = log(ConvertedComp+1))) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+
+
+```
+
+
+As the data is still highly skewed, I will stick to its log form while modeling.
+
+
+
+```{r}
+data_correlations <- 
+  cor(data[,data_numeric_vars],
+      use = "pairwise.complete.obs")
+
+
+
+
+
+corrplot.mixed(data_correlations,
+               upper = "square",
+               lower = "number",
+               tl.col="black", 
+               tl.pos = "lt") 
+
+```
+
+
+The most correlated numerical variables are: Age, YearsCode, YearsCodePro. Not suprisingly, let's leave all of them.
+
+Let's prove whether there are any linear combinations between the numeric variables:
+
+```{r}
+( findLinearCombos(data[, data_numeric_vars] ) ->
+    data_linearCombos )
+```
+
+No linear combinations.
+
+
+
+Categorical variables:
+Let's now apply the function written during classes sorting the categorical variables by F-statistic from anova test (the higher F-statistic, the stronger we reject the null hypothesis about lack of influence of the categorical variable on the outcome)
+```{r}
+data_F_anova <- function(categorical_var) {
+  anova_ <- aov(data$ConvertedComp ~ 
+                  data[[categorical_var]]) 
+  
+  return(summary(anova_)[[1]][1, 4])
+}
+
+
+
+sapply(data_factor_vars,
+       data_F_anova) %>% 
+  sort(decreasing = TRUE) -> data_anova_all_categorical
+
+data_anova_all_categorical
+```
+
+The most influential categorical variables on the dependent variable are both connected to the country the respondent lives in. Not very surprising. Further variables in this order are operation systems and  and JobSeek - quite unexpected.
+
+
+
+
+
+Let's divide the dataset into traditional 70/30% partition: 
+
+```{r}
+data_train_index <- createDataPartition(data$ConvertedComp,  p = 0.7,  list = FALSE) 
+data_train <- data[data_train_index,]
+data_test <- data[-data_train_index,]
+
+
+
+options(contrasts = c("contr.treatment",  # for non-ordinal factors
+                      "contr.treatment")) # for ordinal factors
+```
+
+
+
+
+That is the end of ETL process. Let's load the data to the models.
+
+
+
+###Linear model
+
+I will use OLS model as a benchmark for more complicated algorithms.
+
+In this case I will use repeated cross validation with 5 folds and 3 repeats:
+
+
+```{r}
+ctrl_cv5x3 <- trainControl(method = "repeatedcv",
+                            number = 5,
+                            repeats = 3)
+
+model_linear <-  train(log(ConvertedComp) ~ ., 
+                 data = data_train %>% 
+                 dplyr::select(-Respondent),
+                  method = "lm",
+                   trControl = ctrl_cv5x3)
+
+model_linear
+
+summary(model_linear)
+```
+
+Judging by the p-value of F-test we may see that all coefficients are jointly significant. No wonder - coefficients standing next to almost all variables are significant on high levels.
+
+
+###KNN
+
+By trial and error methods I estimated that the optimal k-parameter value is around 25. 
+One has to remember, that the explanatory variables have to be scaled, I will use "range" method for that:
+
+
+```{r}
+ctrl_cv5x3 <- trainControl(method = "repeatedcv",
+                            number = 5,
+                            repeats = 3)
+
+
+different_k <- data.frame(k = 25)
+
+model_knn <-
+  train(log(ConvertedComp) ~ .,
+        data = data_train %>% 
+          
+          dplyr::select(-Respondent),
+
+        method = "knn",
+
+        trControl = ctrl_cv5x3,
+        
+
+        preProcess = c("range"),
+        tuneGrid = different_k)
+
+
+model_knn
+
+
+```
+
+###Random forest
+
+  “Ranger” method is used in order to process random forest and tuneLentgh determined as a default in order to obtain faster computation.  This time I won't use repeated cross validation method for this reason as well:
+
+
+             
+
+```{r}
+
+
+ctrl_cv10 <- trainControl(method = "cv",
+                          number = 5)
+
+model_RF <-   train(log(ConvertedComp) ~ .,
+             data = data_train %>% 
+               dplyr::select(-Respondent),
+              method = "ranger",
+              trControl = ctrl_cv10 )
+
+
+model_RF
+```
+
+
+###Performance measures
+
+To compare the results on the test sample I will use the function written during labs:
+
+```{r}
+regressionMetrics <- function(real, predicted) {
+  # Mean Square Error
+  MSE <- mean((real - predicted)^2)
+  # Root Mean Square Error
+  RMSE <- sqrt(MSE)
+  # Mean Absolute Error
+  MAE <- mean(abs(real - predicted))
+  # Mean Absolute Percentage Error
+  MAPE <- mean(abs(real - predicted)/real)
+  # Median Absolute Error
+  MedAE <- median(abs(real - predicted))
+  # Mean Logarithmic Absolute Error
+  MSLE <- mean((log(1 + real) - log(1 + predicted))^2)
+  # Total Sum of Squares
+  TSS <- sum((real - mean(real))^2)
+  # Residual Sum of Squares
+  RSS <- sum((predicted - real)^2)
+  # R2
+  R2 <- 1 - RSS/TSS
+
+  result <- data.frame(MSE, RMSE, MAE, MAPE, MedAE, MSLE, R2)
+  return(result)
+}
+
+
+regressionMetrics(real = log(data_test$ConvertedComp),
+                  predicted = predict(model_linear, data_test))
+
+regressionMetrics(real = log(data_test$ConvertedComp),
+                  predicted = predict(model_knn, data_test))
+
+regressionMetrics(real = log(data_test$ConvertedComp),
+                  predicted = predict(model_RF, data_test))
+
+
+
+```
+
+
+
+### Conclusions
+The performance measures obtained on the test sample don't differ much. However the best results gives random forest algortihm, the 2nd one is OLS model and then K-nn method with parameter set to 25.
+
+
+###Refrences
+
+1)Lab materials - R scripts and presentations
+
+2)https://www.kaggle.com/boss0ayush/salary-survey-data
+
+3)https://www.rdocumentation.org/
+
+4)https://stackoverflow.com/
+
+

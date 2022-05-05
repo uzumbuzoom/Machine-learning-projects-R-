@@ -1,0 +1,853 @@
+---
+title: "ML2 Regression project - predicting car price in USD"
+author: "Edyta Pszczółkowska 435022"
+date: "19 02 2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+The aim of this project is to predict car's price (in USD)  using as independent variables the most basic traits and parameters.
+As the dataset was collected in 2019, the model will predict the prices as of 2019.
+
+
+*Final variables after feature selection are:
+
+  + brand - categorical, 5 distinct values
+
+
+  + year - age of a car 
+
+
+  + mileage  in kilometers - continuous 
+
+
+  + type of the fuel ( petrol, diesel) - binary
+
+  + volume of the engine in cm3  - continuous  
+
+
+  + transmission (automate, manual)  - binary
+
+
+  + drive unit  - categorical, 5 distinct values
+
+
+
+Source:
+https://www.kaggle.com/slavapasedko/belarus-used-cars-prices
+
+The methods and algortihms will be:
+-linear regression
+-regression tree
+-random forest
+-gradient boost
+
+
+Such a model can be helpful not only for car dealers or individuals who want to buy or sell a car, but also in a wide range of  business sector, e.g. insurance companies, banks (car as a loan security), leasing companies or debt collectors. 
+
+
+```{r}
+
+library(tree)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(ggplot2)
+library(dplyr)
+
+source("getRegressionMetrics.R")
+
+```
+
+```{r}
+setwd("D:\\Edyta pliki\\DS\\III semestr\\ML2")
+cars <-  read.csv("cars.csv")
+```
+
+
+The dataset is really huge. Therefore I will keep 10% of it.
+To keep the same distribution of dependent variable as in the original dataset, I will choose the same function which is used to split data into train and test sample.
+
+
+```{r}
+
+set.seed(987654321)
+which_to_take <- createDataPartition(y = cars$priceUSD,
+                                   p = 0.1,
+                                   list = FALSE)
+
+cars <- cars[which_to_take,]
+
+
+
+``` 
+
+
+## EDA, feature selection
+
+
+Checking NAs...
+
+
+```{r}
+cars[!complete.cases(cars), ]
+```
+
+
+The only variable, where there are any NAs are those representing electrocars - such cars simply don't have engine volume as a parameter. As there are only 6 of them, they would introduce noise and distort the results.
+
+I will let them go:
+
+```{r}
+cars <- cars[cars$fuel_type != "electrocar", ]
+```
+
+
+
+
+Let's start with dependent variable:
+
+```{r}
+hist(cars$priceUSD)
+```
+
+
+```{r}
+boxplot(cars$priceUSD)
+```
+
+Data heavily skewed, many outliers. Let's see the 15 most expensive cars to see, whether this variable is trustworthy:
+
+```{r}
+cars %>%                                      
+  arrange(desc(priceUSD)) %>% 
+  slice(1:15)
+```
+
+Apart from 18-year Mercedes with 160.000 km mileage the records are trustworthy: the brands are well-known for their high prices and the cars are mostly not older than 2 years.
+
+
+```{r}
+cars <- cars[cars$priceUSD != 150000, ]
+```
+
+
+
+Let's check also logarithm form of it:
+
+```{r}
+
+cars$priceLOG <- log(cars$priceUSD)
+hist(cars$priceLOG)
+```
+
+
+The logarithm form of dependent variable is much more symmetric than the basic forms.
+Therefore for the further analysis it will be used as a DEPENDENT VARIABLE.
+
+
+
+And now I will inspect all explanatory variables one-by-one.
+
+I will start with engine volume [cm3], as it must be cleaned up using original values of other independent variables.
+
+
+```{r}
+hist(cars$volume.cm3.)
+```
+
+
+Data heavily skewed, very dubious vales. Let's inspect the most awkward ones:
+
+
+
+```{r}
+cars %>%                                      
+  arrange(desc(volume.cm3.)) %>% 
+  slice(1:10)
+```
+
+
+These are mostly very known models, so I will correct those records by putting mean engine volumes from other cars of this model.
+
+
+
+
+```{r}
+
+cars$volume.cm3.[cars$make == "rover" & cars$model == 200 & cars$volume.cm3. == 14000  ]  <- mean(cars$volume.cm3.[cars$make == "rover" & cars$model == 200 & cars$volume.cm3. < 14000])
+
+cars$volume.cm3.[cars$make == "mazda" & cars$model == 323 & cars$volume.cm3. == 13000 ]  <- mean(cars$volume.cm3.[cars$make == "mazda" & cars$model == 323 & cars$volume.cm3. < 13000] )
+
+cars$volume.cm3.[cars$make == "lada-vaz" & cars$model == 2101 & cars$volume.cm3. == 20000]  <- mean(cars$volume.cm3.[cars$make == "lada-vaz" & cars$model == 2101 & cars$volume.cm3. < 20000] )
+
+cars$volume.cm3.[cars$make == "lada-vaz" & cars$model == 2106 & cars$volume.cm3. == 13000]  <- mean(cars$volume.cm3.[cars$make == "lada-vaz" & cars$model == 2106 & cars$volume.cm3. < 13000] )
+
+cars$volume.cm3.[cars$make == "toyota" & cars$model == 'avensis' & cars$volume.cm3. == 20000]  <- mean(cars$volume.cm3.[cars$make == "toyota" & cars$model == 'avensis' & cars$volume.cm3. < 20000] )
+
+cars$volume.cm3.[cars$make == "citroen" & cars$model == 'c4-grand-picasso' & cars$volume.cm3. == 16000]  <- mean(cars$volume.cm3.[cars$make == "citroen" & cars$model == 'c4-grand-picasso' & cars$volume.cm3. < 16000] )
+
+cars$volume.cm3.[cars$make == "renault" & cars$model == 'laguna' & cars$volume.cm3. == 18000]  <- mean(cars$volume.cm3.[cars$make == "renault" & cars$model == 'laguna' & cars$volume.cm3. < 18000] )
+
+cars$volume.cm3.[cars$make == "ford" & cars$model == 'mondeo' & cars$volume.cm3. == 18000]  <- mean(cars$volume.cm3.[cars$make == "ford" & cars$model == 'mondeo' & cars$volume.cm3. < 18000] )
+
+cars$volume.cm3.[cars$make == "renault" & cars$model == 'trafic' & cars$volume.cm3. == 19000]  <- mean(cars$volume.cm3.[cars$make == "renault" & cars$model == 'trafic' & cars$volume.cm3. < 19000] )
+```
+
+... and let last one weirdo ( eksklyuziv	voennaya-tehnika) go, bye bye:
+
+```{r}
+cars <- cars[cars$volume.cm3. < 8000, ]
+```
+
+
+The following records with high engine volume have been checked on oto-moto.pl web portal to prove its correctness.
+Let's see the distribution now:
+
+```{r}
+hist(cars$volume.cm3.)
+```
+
+Much much better.
+
+
+Car brands:
+
+
+```{r}
+table(cars$make)
+length(table(cars$make))
+```
+
+I will bin cars with respect to countries or parts of the world.
+
+
+```{r}
+cars$make[cars$make %in% c('audi', 'bmw', 'volkswagen', 'porsche', 'mercedes-benz', 'opel', 'smart')] <- "german"
+
+cars$make[cars$make %in% c('citroen', 'peugeot', 'renault', 'alfa-romeo', 'dacia', 'fiat', 'jaguar', 'seat', 'lancia', 'land-rover', 'volvo', 'rover', 'saab', 'mini')] <- "west-european"
+
+cars$make[cars$make %in% c('ford', 'cadillac', 'jeep', 'buick', 'gmc', 'chevrolet', 'lincoln', 'chrysler' )] <- "american"
+
+cars$make[cars$make %in% c('honda', 'toyota', 'isuzu', 'mazda', 'mitsubishi', 'nissan' , 'subaru' , 'suzuki', 'kia', 'hyundai', 'daewoo', 'ssangyong', 'proton' , 'daihatsu', 'infiniti', 'lexus' , 'acura', 'datsun')] <- "japan/korean"
+
+cars$make[(cars$make != "german"& cars$make != "west-european"   & cars$make != "american" & cars$make != "japan/korean" )] <- "other"
+
+cars$make <- as.factor(cars$make)
+table(cars$make)
+```
+
+
+
+Let's see what is behind "model" variable
+
+```{r}
+
+unique(cars$model)
+
+length(unique(cars$model))
+
+
+```
+
+
+644  different models -  binning those cars would be long, tough and give poor results, especially when I am not that good at comparing different cars. I will delete this column without any regrets, bye bye:
+
+```{r}
+cars$model <- NULL
+```
+
+
+
+
+The dataset was collected in 2019, therefore I will change "year" variable into years to make it more comprehensible:
+
+```{r}
+
+cars$year <- 2019 - cars$year
+
+```
+
+...and let's check the distribution:
+
+
+
+```{r}
+hist(cars$year)
+length(cars[cars$year <36,])
+```
+
+I will delete those older than 35 years, there are not many of them:
+
+```{r}
+
+cars <- cars[cars$year <36,]
+hist(cars$year)
+
+```
+
+!!!! Because the model will be trained on records representing cars newer than 35 years, it will be valid  for predictions ONLY on similar cases!!! 
+
+
+
+```{r}
+table(cars$condition)
+
+
+```
+
+Unfortunately, I don't know, what this variable means. Moreover, one of its level covers more than 98% cases (near-zero variance).
+It must be removed:
+
+```{r}
+cars$condition <- NULL
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+options(scipen=999)
+hist(cars$mileage.kilometers.)
+```
+
+
+
+```{r}
+boxplot(cars$mileage.kilometers.)
+```
+
+A lot of horrible outliers let's check it:
+
+```{r}
+tail(sort(cars$mileage.kilometers.),50)
+```
+
+```{r}
+cars %>%                                      
+  arrange(desc(mileage.kilometers.)) %>% 
+  slice(1:70)
+```
+
+
+
+So many horrible outliers.
+Moroever values like "9999999" like as if someone randomly put it into dataframe. As there are not much of them, I will delete them as well:
+
+```{r}
+
+cars <- cars[cars$mileage.kilometers. < 999999,]
+```
+
+The following high values seem to be OK - the cars are older than 12 years and don't cost much.
+
+
+Now the other way round: there are so many cars with a very low mileage:
+
+```{r}
+head(sort(cars$mileage.kilometers.),150)
+```
+
+
+
+Maybe they are new? Let's inspect those with mileage below 5000 km with respect to its age:
+
+```{r}
+length(cars$mileage.kilometers.[cars$mileage.kilometers. < 5000])
+
+
+less_than_5000km <- cars[cars$mileage.kilometers. < 5000 ,]
+
+hist(less_than_5000km$year)
+
+
+```
+
+
+It is very doubtful, how so old cars may have so low mileage. 
+I will delete them  those records, where mileage is below 5000 km and it is older than 3 years:
+
+```{r}
+rm(less_than_5000km)
+
+cars <- cars[((cars$mileage.kilometers. < 5000 & cars$year < 3) | cars$mileage.kilometers. >= 5000 )  ,]
+
+```
+
+
+
+
+
+
+```{r}
+table(cars$color)
+```
+
+The column has a lot of levels. Such a variable in case of this dataset is also not very valuable one. Therefore I will delete this variable:
+
+```{r}
+cars$color <- NULL
+```
+
+
+
+```{r}
+table(cars$segment)
+```
+
+As it was written in the description of the dates on Kaggle, the choice of segment for each of the car was chosen arbitrarily, i.e. it has not been proved with official cars classification regarding its segment.
+So, even if it would be a precious variable, I cannot rely on it, therefore it will be removed:
+
+```{r}
+
+cars$segment <- NULL
+```
+
+Now time for binary variables, these ones must be also turned into factors:
+
+
+
+```{r}
+table(cars$fuel_type)
+
+cars$fuel_type <- as.factor(cars$fuel_type)
+```
+
+
+
+
+```{r}
+table(cars$transmission)
+
+cars$transmission <- as.factor(cars$transmission)
+```
+
+```{r}
+table(cars$drive_unit)
+
+#turn NAs into "Unknown" 
+
+cars$drive_unit[which(cars$drive_unit == "") ] <- "Unknown"
+cars$drive_unit <- as.factor(cars$drive_unit)
+```
+
+
+
+Let's check correlations:
+
+
+```{r}
+cars_correlations <- 
+  cor(cars[,c('priceUSD', 'year', 'mileage.kilometers.', 'volume.cm3.')],
+      use = "pairwise.complete.obs")
+
+cars_correlations
+
+library(corrplot)
+
+corrplot(cars_correlations)
+
+
+```
+
+The strength and sign of correlation is the same as we may suppose.
+Variables "year" and "mileage.kilometers" are strongly correlated - it will be a problem while modelling, but I will not spoil now.
+
+
+
+## Creating test and train dataset 
+
+```{r}
+set.seed(987654321)
+which_train <- createDataPartition(y = cars$priceUSD,
+                                   p = 0.7,
+                                   list = FALSE)
+
+cars_train <- cars[which_train,]
+cars_test <- cars[-which_train,]
+
+```
+
+... and preparing model formula.
+
+As mentioned above: because the log form of DepVar is almost symmetric one, I will stick to it in further analysis.s
+
+```{r}
+variables <- names(cars_train)
+model.formula <- as.formula(paste("priceLOG ~", 
+                                  paste(variables[!variables %in% c("priceUSD", "priceLOG" )], 
+                                        collapse = " + ")))
+model.formula
+```
+
+
+### LINEAR REGRESSION
+
+The most simple model will serve as a benchmark:
+
+```{r}
+linear_regression1 <- lm(model.formula, data = cars_train)
+summary(linear_regression1)
+
+```
+
+
+
+
+As it was hinted above, because of a strong correlation between year and mileage variables, the model treats the latter as highly insignificant.  Let's see how the model changes, if we introduce a synthetic variable derived by division of mileage by year and exclude the original ones (@MR SAKOWSKI: THANKS FOR SUGGESTION DURING PRESENTATION!!!)   :
+
+```{r}
+cars_train$mileage_by_year <- ifelse(cars_train$year != 0, cars_train$mileage.kilometers. / cars_train$year, 0)
+
+variables2 <- colnames(cars_train)
+
+model.formula2 <- as.formula(paste("priceLOG ~", 
+                                  paste(variables2[!variables %in% c("priceUSD", "priceLOG" , "year", "mileage.kilometers.")], 
+                                        collapse = " + ")))
+model.formula2
+
+linear_regression2 <- lm(model.formula2, data = cars_train)
+summary(linear_regression2)
+```
+
+Judging by adjusted R2 measure it was not a good idea. Let's remove the new variable:
+
+```{r}
+cars_train$mileage_by_year <- NULL
+```
+
+
+So let's just remove variable "mileage" and leave "year" as common indicator of how the cars are exploited.
+
+
+```{r}
+model.formula3 <- as.formula(paste("priceLOG ~", 
+                                  paste(variables[!variables %in% c("priceUSD", "priceLOG" , "mileage.kilometers.")], 
+                                        collapse = " + ")))
+model.formula3
+
+linear_regression3 <- lm(model.formula3, data = cars_train)
+summary(linear_regression3)
+
+```
+
+
+Let's also compare all 3 models above using AIC criterion  as it is a good method to compare predictive models with different number of predictors:
+
+
+```{r}
+AIC(linear_regression1)
+AIC(linear_regression2)
+AIC(linear_regression3)
+```
+
+
+The 3rd model without "mileage" variable did not improve much compared to the 1st one with full set of independent variables, nevertheless leaving redundant variables makes the model simpler and therefore less vulnerable to overfitting.
+
+```{r}
+rm(linear_regression1)
+rm(linear_regression2)
+```
+
+
+Saving predictions:
+
+```{r}
+pred_lm_train <- predict(linear_regression3, newdata = cars_train)
+measures_lm_train <- getRegressionMetrics(real = cars_train$priceLOG,
+                     predicted = pred_lm_train)
+
+
+pred_lm_test <- predict(linear_regression3, newdata = cars_test)
+measures_lm_test <- getRegressionMetrics(real = cars_test$priceLOG,
+                     predicted = pred_lm_test)
+```
+
+
+
+### REGRESSION TREE
+
+The advantage of regression tree its non-sensitiveness to  outliers and easiness to interpret and visualize. 
+
+Out of all 3 functions to create the decision trees (train, tree, rpart) showed during lectures, the best performance on the test data gives the rpart function. Not to bore my reader, I won't include those other ones here.
+
+
+To tune the parameters I used the same functions as it was used during labs.
+
+
+
+
+```{r}
+hyper_grid <- expand.grid(
+  minsplit = seq(5, 20, 1),
+  maxdepth = seq(8, 15, 1)
+)
+
+
+
+models <- list()
+for (i in 1:nrow(hyper_grid)) {
+  
+
+  
+  # setting the values
+  minsplit <- hyper_grid$minsplit[i]
+  maxdepth <- hyper_grid$maxdepth[i]
+  
+  # settin the seed
+  set.seed(123123 + i)
+  
+  # training of the model and saving results to the list
+  models[[i]] <- rpart(
+    formula = model.formula ,
+    data    = cars_train,
+    method  = "anova",
+    control = list(minsplit = minsplit, maxdepth = maxdepth)
+  )
+}
+
+
+get_cp <- function(x) {
+  min <- which.min(x$cptable[, "xerror"])
+  cp  <- x$cptable[min, "CP"] 
+  return(cp)
+}
+
+get_min_error <- function(x) {
+  min    <- which.min(x$cptable[, "xerror"])
+  xerror <- x$cptable[min, "xerror"] 
+  return(xerror)
+}
+
+
+hyper_grid %>%
+  mutate(
+    cp    = purrr::map_dbl(models, get_cp),
+    error = purrr::map_dbl(models, get_min_error)
+  ) %>%
+  arrange(error) %>%
+  top_n(-5, wt = error)
+```
+
+Then I will insert the values of parameters which obtained the lowest error:
+
+```{r}
+cars.tree <- rpart(
+  formula = model.formula,
+  data    = cars_train,
+  method  = "anova",
+  control = list(minsplit =8, maxdepth = 9, cp = 0.01)
+)
+
+```
+
+
+```{r}
+rpart.plot(cars.tree)
+```
+
+
+
+Another advantage of this algorithm is to pick up the most important variables.
+As we can see only 3 variables were used in the final model: year, engine volume and brand. 
+
+
+
+Saving predictions:
+
+
+```{r}
+
+pred_tree_train <- predict(cars.tree, newdata = cars_train)
+measures_tree_train <- getRegressionMetrics(real = cars_train$priceLOG,
+                     predicted = pred_tree_train)
+
+
+pred_tree_test <- predict(cars.tree, newdata = cars_test)
+measures_tree_test <- getRegressionMetrics(real = cars_test$priceLOG,
+                     predicted = pred_tree_test)
+```
+
+
+
+##  RANDOM FORESTS
+
+Random forests help to reduce tree correlation by introducing more randomness into the tree-growing process.
+More specifically, for every single regression tree from the forest, the trained data is bootstrapped from the original training dataset. As it was proved during labs, in a process of bootstrapping the sample, ca. 30% of the dataset is rejected.
+This 30% of data may be used then to prove the quality of the model, i.e out-of-bag error ("oob")
+
+Moreover for every single regression tree not all independent variables are used, but its subset. The number of chosen variables must be found using cross-validation. In my model I will try to check number of independent variables between 2 and 6. 
+
+
+Such a method is robust to correlated variables, which in my case is very precious trait - year and mileage variables are highly correlated.
+It has also the ability to asses the importance of variables, I am going to plot it.
+
+
+THe number of decision tree in the forest and minimal node size was chosen using trial and error method.
+
+
+```{r}
+
+set.seed(123457)
+parameters_rf <- expand.grid(mtry = 2:6)
+ctrl_oob <- trainControl(method = "oob")
+
+
+
+
+cars.rf <-    train(model.formula,
+          data = cars_train,
+          method = "rf",
+          ntree = 500,
+          nodesize = 350,
+          tuneGrid = parameters_rf,
+          trControl = ctrl_oob,
+          importance = TRUE)
+
+
+cars.rf 
+```
+
+The best number of used variables is 6:
+
+```{r}
+plot(cars.rf)
+```
+
+
+... and promised variable importance:
+
+
+
+```{r}
+var_importance_rf <- varImp(cars.rf)
+
+## S3 method for class 'varImp.train'
+ggplot(
+  var_importance_rf,
+  mapping = NULL,
+  top = dim(var_importance_rf$importance)[1],
+    environment = NULL
+)
+```
+
+
+
+
+Let's compare performance of the model on training and testing dataset to check if it is not overfitted:
+
+
+```{r}
+
+pred_rf_train <- predict(cars.rf, newdata = cars_train)
+measures_rf_train <- getRegressionMetrics(real = cars_train$priceLOG,
+                     predicted = pred_rf_train)
+
+
+pred_rf_test <- predict(cars.rf, newdata = cars_test)
+measures_rf_test <- getRegressionMetrics(real = cars_test$priceLOG,
+                     predicted = pred_rf_test)
+```
+
+
+
+
+## Gradient boost
+
+Gradient boost method is one of couple of models based on the idea of boosting.
+Boosting is an ensemble modeling technique that attempts to build a strong classifier from the number of weak classifiers, i.e. the consecutive trees are correcting the previous one.
+
+I will use cross validation to tune 4 parameters:
+
+1. n.trees – Number of trees (here: the number of gradient boosting iteration) i.e. N. Increasing N reduces the error on training set, but setting it too high may lead to over-fitting.
+
+2. interaction.depth (Maximum nodes per tree) - number of splits it has to perform on a tree (starting from a single node).
+
+3. Shrinkage (Learning Rate) – It is considered as a learning rate.
+Shrinkage is commonly used in ridge regression where it reduces regression coefficients to zero and, thus, reduces the impact of potentially unstable regression coefficients.
+In the context of GBMs, shrinkage is used for reducing, or shrinking, the impact of each additional fitted base-learner (tree). 
+
+
+
+Source: https://www.listendata.com/2015/07/gbm-boosted-models-tuning-parameters.html
+
+```{r}
+parameters_gbm <- expand.grid(interaction.depth = c(1, 2, 3, 4),
+                             n.trees = c(300, 400),
+                             shrinkage = c( 0.01,  0.05,  0.1), 
+                             n.minobsinnode = c( 300, 400))
+ctrl_cv10 <- trainControl(method = "cv", 
+                         number =10)
+
+  cars.gbm  <- train(model.formula,
+                         data = cars_train,
+                         distribution = "gaussian",
+                         method = "gbm",
+                         tuneGrid = parameters_gbm,
+                         trControl = ctrl_cv10,
+                         verbose = FALSE)
+
+  
+  cars.gbm
+
+```
+
+Let's plot the changes relations of all tuned parameters:
+
+```{r}
+plot(cars.gbm)
+```
+
+
+
+
+..and save predictions both on train and test dataset:
+
+
+```{r}
+
+pred_gbm_train <- predict(cars.gbm, newdata = cars_train)
+measures_gbm_train <- getRegressionMetrics(real = cars_train$priceLOG,
+                     predicted = pred_gbm_train)
+
+
+pred_gbm_test <- predict(cars.gbm, newdata = cars_test)
+measures_gbm_test <- getRegressionMetrics(real = cars_test$priceLOG,
+                     predicted = pred_gbm_test)
+```
+
+
+## Comparison of models' qualities and conclusion
+
+
+
+
+Binding all data together:
+
+```{r}
+comparison  <- rbind(measures_lm_train, measures_lm_test, measures_tree_train, measures_tree_test, measures_rf_train, measures_rf_test, measures_gbm_train, measures_gbm_test)
+
+comparison$method <- c('measures_lm_train', 'measures_lm_test', 'measures_tree_train', 'measures_tree_test', 'measures_rf_train', 'measures_rf_test', 'measures_gbm_train', 'measures_gbm_test')
+
+comparison
+```
+
+
+As the tree-based models are prone to be overfitted, I measured  performance also on the training dataset to see, if the performances on both subsets are similar. We may see, that the random forest model performed slightly better on the train dataset.
+
+
+Judging by the measures on testing sample above, the gbm and linear regression models have the best (almost same) predictive power with little advantage of lm. Regression tree performed as the worst one.
+
+For all tree based models, variable 'year' was the most important followed by "mileage" and "engine volume".
+

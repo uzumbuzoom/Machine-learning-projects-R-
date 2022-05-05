@@ -1,0 +1,461 @@
+---
+title: "Film reviews classification using SVM and sentiment analysis"
+author: 
+date: "11 02 2022"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE )
+
+```
+
+The aim of this project is to compare two different tools used for classification  purposes - sentiment analysis (by using BING and AFFIN dictionaries) and classical classification approach  SVM algorithm.
+I will try to describe, in which cases those methods fail to predict the correct outcome and based on this analysis conclude, which tool is the best one.
+
+The dataset (source: kaggle) contains 2 columns: 40000 opinions about the movies and a label classifying it as negative (0) or positive (1).
+
+I will split the dataset into train and test sample to train ML models, whereas for sentiment analysis the train subset is not needed. 
+
+
+### Installing libraries and data preparation
+
+```{r}
+library(caret)
+library(tm)
+library(tidytext)
+library(dplyr)
+library(stringr)
+library(tidyr)
+
+
+setwd('D:\\Edyta pliki\\DS\\III semestr\\TMSTMT\\Sentiment analysis Film reviews\\projekt poprawiony')
+movies <- read.csv("Train.csv")
+
+nrow(movies)
+```
+
+
+
+The number of records is too big, I will take 1% of them:
+
+```{r}
+movies <- movies[1:400 , ]
+```
+
+Let's see the distribution of target variable in both subsets of data:
+
+
+```{r}
+table(movies$label)
+```
+
+There is a balance of factors of target variable.
+
+
+Some pre-processing...
+
+
+```{r}
+colnames(movies)
+colnames(movies) <- c('text', 'label')
+colnames(movies)
+```
+```{r}
+
+```
+
+Splitting data into test and train subsets:
+
+```{r}
+set.seed(12345)
+train_idx <- createDataPartition(movies$label, p=0.75, list=FALSE)
+train_data <- movies[train_idx,]
+test_data <- movies[-train_idx,]
+
+```
+
+
+## ML method - SVM
+
+
+### Preparing corpus and cleaning data for both subsets
+
+
+
+```{r}
+corpus_train <- Corpus(VectorSource(train_data$text))
+corpus_train <- tm_map(corpus_train, content_transformer(tolower))
+corpus_train <- tm_map(corpus_train, removeWords, stopwords('english'))
+corpus_train <- tm_map(corpus_train, removeWords, stopwords('en'))
+corpus_train <- tm_map(corpus_train, removeWords, stopwords('smart'))
+corpus_train <- tm_map(corpus_train, removePunctuation)
+corpus_train <- tm_map(corpus_train, removeNumbers)
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+corpus_train <-tm_map(corpus_train,toSpace,"<br />")
+corpus_train <- tm_map(corpus_train, stripWhitespace)
+
+```
+
+Let's see the most common words:
+
+```{r}
+library(wordcloud)
+wordcloud(corpus_train, min.freq = 40, random.order = FALSE)
+
+train_dtm <- DocumentTermMatrix(corpus_train)
+```
+
+The matrix is huge, let's pick only the most frequent terms.
+By trial and error method I have chosen the lowest frequency of words equal to 8, as it gave the best predictions on test data.
+
+
+```{r}
+frequent <- findFreqTerms(train_dtm, lowfreq=8)
+train_dtm <- DocumentTermMatrix(corpus_train, list(global = c(2, Inf), dictionary = frequent))
+train_dtm <- as.matrix(train_dtm)
+```
+
+Train data matrix is ready, let's perform the same steps on  test data starting from cleaning the corpus.
+Essential part here is to pick the same dictionary of words as in train sample while creating DTM: 
+
+
+```{r}
+corpus_test <- Corpus(VectorSource(test_data$text))
+corpus_test <- tm_map(corpus_test, content_transformer(tolower))
+corpus_test <- tm_map(corpus_test, removeWords, stopwords('english'))
+corpus_train <- tm_map(corpus_train, removeWords, stopwords('en'))
+corpus_train <- tm_map(corpus_train, removeWords, stopwords('smart'))
+corpus_test <- tm_map(corpus_test, removePunctuation)
+corpus_test <- tm_map(corpus_test, removeNumbers)
+toSpace <- content_transformer(function (x , pattern ) gsub(pattern, " ", x))
+corpus_test <-tm_map(corpus_test,toSpace,"<br />")
+corpus_test <- tm_map(corpus_test, stripWhitespace)
+
+# Dictionary = frequent !!!
+
+test_dtm <- DocumentTermMatrix(corpus_test, list(global = c(2, Inf), dictionary = frequent))
+test_dtm <- as.matrix(test_dtm)
+```
+
+### SVM
+
+First we have to prepare train dtm matrix to gain a proper input for training the model: 
+
+
+```{r}
+training_set <- cbind(train_dtm, train_data$label)
+
+#renaming last column
+colnames(training_set)[ncol(training_set)] <- "y"
+training_set <- as.data.frame(training_set)
+training_set$y <- as.factor(training_set$y)
+```
+
+And eventually we can train the model:
+
+```{r}
+library(caret)
+library(LiblineaR)
+library(e1071)
+
+review_model <- svm( y ~. , data=  training_set)
+review_model 
+```
+
+Now time to make a prediction and store it in test_data dataframe in order to compare with other methods:
+
+```{r}
+svm_model_result <- predict(review_model, newdata = test_dtm)
+svm_model_result <- as.data.frame(svm_model_result)
+test_data <- cbind(test_data, svm_model_result)
+```
+
+
+
+
+
+
+## Sentiment analysis
+
+Sentiment analysis method doesn't need train dataset.
+Let's add an index to test_data to be able to group and summarize the output using dplyr package:
+
+
+```{r}
+test_data$index <- 1:nrow(test_data)
+
+#moving index as the first column:
+
+test_data <- test_data[,c(ncol(test_data),1:(ncol(test_data)-1))]
+```
+
+Now time for the core part of sentiment analysis.
+
+
+I will use two dictionaries: 
+- "bing", which is a list of 6786 common words labeled as positive and negative. 
+-"afinn" which is a list of 2477 common words rated between -5 and 5, where -5 are the most negative and vice versa.
+
+
+As an input we have to split all reviews text into tokens, join the df with proper dictionary, group by texts indices and sum the grades of every token in a particular text (movie review).
+
+
+```{r}
+tokens <- test_data %>% unnest_tokens(word, text)
+```
+
+
+### Sentiment analysis with BING dictionary
+
+To make calculations easier, I will relabel words in bing dictionary into '1' and '-1' to be able to sum the outcome with respect to text index:
+
+
+
+```{r}
+bing <- get_sentiments("bing")
+bing$sentiment <- ifelse(bing$sentiment == "positive", 1, -1)
+sentiment_analysis_bing <- tokens %>% inner_join(bing) %>% group_by(index) %>% summarise(sentiment_bing = sum(sentiment))
+```
+
+labeling the output with the same labels as in test dataframe:
+
+
+                                       
+
+```{r}
+sentiment_analysis_bing$sentiment_bing <- ifelse(sentiment_analysis_bing$sentiment_bing > 0 , 1 ,
+                                    ifelse(sentiment_analysis_bing$sentiment_bing == 0, 'neutral', 0))
+```
+
+
+   
+Store results in test_data dataframe in order to compare with other methods:
+                                      
+
+
+```{r}
+test_data <- cbind(test_data, sentiment_analysis_bing)
+```
+
+Method performance, how many instances were predicted wrong?
+
+
+```{r}
+length(test_data$index[test_data$label != test_data$sentiment_bing])
+```
+
+
+
+
+### Sentiment analysis with AFINN dictionary
+
+Same step as before:
+
+```{r}
+
+library(textdata)
+afinn <- get_sentiments("afinn")
+
+sentiment_analysis_afinn<- tokens %>% inner_join(afinn) %>% group_by(index) %>% summarise(sentiment_afinn=sum(value))
+
+sentiment_analysis_afinn$sentiment_afinn <- ifelse(sentiment_analysis_afinn$sentiment_afinn > 0 , 1 ,
+                                    ifelse(sentiment_analysis_afinn$sentiment_afinn == 0, 'neutral', 0))
+
+test_data <- cbind(test_data, sentiment_analysis_afinn)
+```
+
+
+
+Method performance, how many instances were predicted wrong?
+
+
+```{r}
+length(test_data$index[test_data$label != test_data$sentiment_afinn])
+```
+
+
+As there is no neutral label in the initial dataset, I will remove all cases where sentiment analysis method labeled reviews as neutral, there are 8 of such cases, all coming from "bing" subset.
+
+```{r}
+test_data <- test_data[test_data$sentiment_bing != "neutral", ]
+test_data <- test_data[test_data$sentiment_afinn != "neutral", ]
+```
+
+
+## Comparison of results
+
+
+```{r}
+test_data$sentiment_bing <- as.factor(test_data$sentiment_bing)
+test_data$sentiment_afinn <- as.factor(test_data$sentiment_afinn)
+test_data$label <- as.factor(test_data$label)
+
+#BING
+confMatrix1 <- confusionMatrix(test_data$sentiment_bing, test_data$label, positive="1")
+confMatrix1
+
+
+#AFINN
+confMatrix2 <- confusionMatrix(test_data$sentiment_afinn, test_data$label, positive="1")
+confMatrix2
+
+
+
+
+
+
+#SVM
+confMatrix3 <- confusionMatrix(test_data$svm_model_result, test_data$label, positive = '1')
+confMatrix3
+
+
+```
+
+
+And the winner is: sentiment analysis using BING dictionary judging by accuracy.
+
+The worst performance is in case of sentiment analysis using AFINN dictionary - especially its specificity.
+
+
+## Mistakes inspections
+
+In this part of my work I will inspect in which cases both methods failed to assign the text to proper categories and why.
+
+### Sentiment analysis - mistakes
+ 
+
+Let's see  which text reviews were assigned incorrectly as positive by both methods:
+
+```{r}
+test_data$index[test_data$label == 0  & test_data$sentiment_bing == 1 & test_data$sentiment_afinn ==1]
+```
+
+
+To understand the mistakes the SA method did, let's inspect the positive words which mislead the algorithm to put the text in a bad group:
+
+
+
+
+```{r}
+tokens %>% inner_join(bing) %>% filter(index == 11) %>% filter(sentiment == 1)
+```
+
+
+```{r}
+tokens %>% inner_join(afinn) %>% filter(index == 11) %>% filter(value %in% c(1,2,3,4,5))
+
+```
+
+...and see the context in which those words were used:
+
+```{r}
+test_data$text[test_data$index == 11]
+```
+
+
+
+Word "like" was used in context of comparison, "sexy" and "faster" as an irony.
+
+The next example:
+
+
+```{r}
+tokens %>% inner_join(bing) %>% filter(index == 18) %>% filter(sentiment == 1)
+
+```
+```{r}
+tokens %>% inner_join(afinn) %>% filter(index == 18) %>% filter(value %in% c(1,2,3,4,5))
+```
+
+
+```{r}
+test_data$text[test_data$index == 18]
+```
+
+
+Words "fantastic" is used in the title of the movie , "beloved" and "classic" refer to the book upon which the film was adapted.
+
+
+And the other way round: let's inspect the deceptive words from both dictionaries, which assigned positive reviews to negative ones:
+
+
+```{r}
+
+test_data$index[test_data$label == 1  & test_data$sentiment_bing == 0 & test_data$sentiment_afinn ==0]
+
+```
+
+```{r}
+tokens %>% inner_join(bing) %>% filter(index == 10) %>% filter(sentiment == -1)
+```
+
+```{r}
+tokens %>% inner_join(afinn) %>% filter(index == 10) %>% filter(value %in% c(-1,-2,-3,-4,-5))
+
+```
+```{r}
+test_data$text[test_data$index == 10]
+```
+
+
+The whole bunch if negative words is used, because of the fact, that the movie is an unhappy story and actors mentioned are are dark characters ("evil", "criminal", "clueless")
+
+
+```{r}
+tokens %>% inner_join(bing) %>% filter(index == 88) %>% filter(sentiment == -1)
+```
+
+```{r}
+tokens %>% inner_join(afinn) %>% filter(index == 88) %>% filter(value %in% c(-1,-2,-3,-4,-5))
+```
+
+```{r}
+test_data$text[test_data$index == 88]
+```
+
+
+
+
+
+Again, the negative words  are not used to express criticism of the movie, but to describe its atmosphere.
+
+CONSLUSION: the sentiment analysis method is not able to discover context in which the words were used.
+
+
+
+### SVM clasiffication - mistakes
+
+
+```{r}
+test_data$index[test_data$label == 1  & test_data$svm_model_result == 0 ]
+```
+
+```{r}
+test_data$text[test_data$index == 35]
+```
+
+
+
+```{r}
+
+test_data$index[test_data$label == 0  & test_data$svm_model_result == 1 ]
+
+```
+
+```{r}
+test_data$text[test_data$index == 52]
+```
+
+In case of SVM, it is not that obvious to conclude, why the algorithm made a mistake. 
+
+# CONCLUSION
+
+
+On the tested dataset, both methods' accuracies are similar therefore it is always worth checking different approaches and compare. Especially when both of them are very easy to implement.
+
+
+
+
+

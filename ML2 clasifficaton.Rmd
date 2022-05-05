@@ -1,0 +1,781 @@
+---
+title: "ML2 classification project - prediction of diabetes"
+author: "Edyta Pszczolkowska 435022"
+date: "06 03 2022"
+output: 
+  html_document:
+    toc: true 
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+
+The aim of this project is to predict whether a patient is prone to suffering from diabetes.
+Given the fact, that diabetes has disastrous health complications, such a model is precious tool for prevention and medical research to discover potential risk factors. 
+
+*The following methods will be used:
+  + ridge classification
+  + classification tree
+  + random forest
+  + neural networks
+
+The dataset (source: Kaggle) consists of 20 dependent variables, providing information either about lifestyle, income and insurance or general health condition of the respondents.
+
+DepVar: Diabetes_binary/Outcome - a two level factor (0 - not prone to diabetes, 1 - prone to diabetes)
+ 
+
+Independent variables:
+
+*BINARY
+
+  + High Blood Pressure --> HighBP
+
+  + High Cholesterol -- > HighChol
+
+  + Cholesterol check within past five years --> CholCheck
+
+  + Smoked at least 100 cigarettes in your entire life? [Note: 5 packs = 100 cigarettes] --> Smoker
+
+  + Ever had a stroke. --> Stroke
+
+  + Coronary heart disease (CHD) or myocardial infarction (MI) --> HeartDiseaseorAttack
+
+  + physical activity in past 30 days - not including job 0 --> PhysActivit
+
+  + Consume Fruit 1 or more times per day --> Fruit
+
+  + Consume Vegetables 1 or more times per day --> Veggie
+
+  + Heavy drinkers (adult men having more than 14 drinks per week and adult women having more than 7 drinks per week) -->                    HvyAlcoholConsump
+
+
+  + Do you have any kind of health care coverage, including health insurance, prepaid plans such as HMOs, or government plans                such     as Medicare, or Indian Health Service? --> AnyHealthcare
+
+  + Was there a time in the past 12 months when you needed to see a doctor but could not because of cost? --> NoDocbcCost
+
+  + Do you have serious difficulty walking or climbing stairs? --> DIFFWALK
+
+  + Indicate sex of respondent. --> SEX
+
+
+
+
+
+*Ordinal variables:
+
+ + Grade your  general your health in a scale 1-5 (  1 = excellent 2 = very good 3 = good 4 = fair 5 = poor) 
+
+
+ + Education level, scale 1-6 (1 - the most basic educations) --> Education
+
+
+ + Income from all sources, scale 1-8 (1 = less than $10,000 5 = less than $35,000 8 = $75,000 or more):  --> Income
+
+
+ + Fourteen-level age category 
+
+  + Body Mass Index (BMI) --> BMI
+
+
+*Discrete variables:
+
+
+  + for how many days during the past 30 days was your mental health not good? (1-30) --> MENTHLTH
+
+  + for how many days during the past 30 days was your physical health not good? (1-30) --> PHYSHLTH
+
+
+
+
+
+
+
+## Loading packages
+
+```{r}
+library(glmnet)
+library(caret)
+library(ggplot2)
+library(dplyr)
+library(neuralnet)
+
+```
+
+```{r}
+
+
+diabetes <- read.csv("D:\\Edyta pliki\\DS\\III semestr\\ML2\\diabetes_binary.csv")
+
+nrow(diabetes)
+
+
+table(diabetes$Diabetes_binary) 
+
+head(diabetes$Diabetes_binary, 50)
+
+tail(diabetes$Diabetes_binary, 50)
+
+```
+
+The initial dataset is balanced.
+
+As the dataset is so huge, I will pick up 6000 records.
+BUT: as we can see above, the column with dependent variable in the initial dataset is sorted, i.e. first  35346  observations have outcome equal to 0. Therefore I can't simply take first 5% of observations, as I would get only records with "0" as dependent variable.
+
+So I will choose half from tail and half from head:
+
+
+
+```{r}
+diabetes <- rbind(head(diabetes, 3000), tail(diabetes,3000))
+table(diabetes$Diabetes_binary)
+```
+
+I don't really like the name of the dependent variable, I will change it.
+But much more important thing is to turn it into factor:
+
+```{r}
+names(diabetes)[names(diabetes) == 'Diabetes_binary'] <- 'Outcome'
+
+diabetes$Outcome <- as.factor(diabetes$Outcome)
+```
+
+Checking NAs...:
+
+```{r}
+colSums(is.na(diabetes)) %>% 
+  sort()
+```
+
+
+Turning all binary variables into factors and leveling ordinal ones:
+
+
+```{r}
+diabetes$HighBP <- as.factor(diabetes$HighBP)
+diabetes$HighChol <- as.factor(diabetes$HighChol)
+diabetes$CholCheck <- as.factor(diabetes$CholCheck)
+diabetes$Smoker <- as.factor(diabetes$Smoker)
+diabetes$Stroke <- as.factor(diabetes$Stroke)
+diabetes$HeartDiseaseorAttack <- as.factor(diabetes$HeartDiseaseorAttack)
+diabetes$PhysActivity <- as.factor(diabetes$PhysActivity)
+diabetes$Fruits <- as.factor(diabetes$Fruits)
+diabetes$Veggies <- as.factor(diabetes$Veggies)
+diabetes$HvyAlcoholConsump <- as.factor(diabetes$HvyAlcoholConsump)
+diabetes$AnyHealthcare <- as.factor(diabetes$AnyHealthcare)
+diabetes$NoDocbcCost <- as.factor(diabetes$NoDocbcCost)
+diabetes$DiffWalk <- as.factor(diabetes$DiffWalk)
+diabetes$Sex <- as.factor(diabetes$Sex)
+
+
+
+
+
+diabetes$GenHlth <- factor(diabetes$GenHlth,
+                           levels = c('5','4','3','2','1'),
+                           ordered = TRUE) # !!!    1 - excellent, 5 - very poor
+levels(diabetes$GenHlth)
+
+
+
+
+
+
+
+diabetes$Education <- factor(diabetes$Education,
+                           # levels from lowest to highest
+                           levels = c('1','2','3','4','5', '6'),
+                           ordered = TRUE) # ordinal
+levels(diabetes$Education)
+
+
+
+
+
+
+diabetes$Income <- factor(diabetes$Income,
+                           # levels from lowest to highest
+                           levels = c('1','2','3','4','5', '6','7','8'),
+                           ordered = TRUE) # ordinal
+
+levels(diabetes$Income)
+
+
+```
+
+
+For variable Age there are too many bins, I will assign the records into 4 bins.
+*As a reminder:
+
+
+  + 1. group = 18-24 
+  + 9. group = 60-64 
+  + .....
+  + 13. group = 80 or older 
+
+
+*My bins: 
+  + young  - groups 1,2,3  (18-32)
+  + adult1 - groups 4,5,6 (33-49)
+  + adult2 - groups 7, 8,9 (50-65)
+  + old - groups 10,11,12,13 (66+)
+
+
+```{r}
+
+diabetes$Age[diabetes$Age %in% c(1,2,3)] <- "young"
+diabetes$Age[diabetes$Age %in% c(4,5,6)] <- "adult1"
+diabetes$Age[diabetes$Age %in% c(7,8,9)] <- "adult2"
+diabetes$Age[diabetes$Age %in% c(10,11,12,13)] <- "old"
+
+diabetes$Age <- factor(diabetes$Age,
+                           # levels from lowest to highest
+                           levels = c("young", "adult1", "adult2", "old"  ),
+                           ordered = TRUE) # ordinal
+
+levels(diabetes$Age)
+```
+
+
+
+
+
+
+
+```{r}
+ggplot(diabetes,
+       aes(x = BMI)) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+boxplot(diabetes$BMI)
+
+```
+ 
+ 
+ 
+I will remove those 5 most extreme values:
+
+
+
+
+```{r}
+
+diabetes <- diabetes[diabetes$BMI < 79,]
+
+
+boxplot(diabetes$BMI)
+
+ggplot(diabetes,
+       aes(x = BMI)) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+```
+
+Since there is very common known official table to group this measure, I will bin records in  my dataset as well:
+
+```{r}
+diabetes$BMI[diabetes$BMI >= 40] <- "obese III"
+diabetes$BMI[diabetes$BMI < 18.5] <- "underweight"
+diabetes$BMI[diabetes$BMI >= 18.5 & diabetes$BMI < 24.9  ] <- "normal"
+diabetes$BMI[diabetes$BMI >=  25 &  diabetes$BMI < 29.9 ] <- "overweight"
+diabetes$BMI[diabetes$BMI >= 30 & diabetes$BMI < 34.9 ] <- "obese I"
+diabetes$BMI[diabetes$BMI >=  35 & diabetes$BMI < 39.9 ] <- "obese II"
+
+
+
+diabetes$BMI <- factor(diabetes$BMI,
+                           # levels from lowest to highest
+                           levels = c('underweight','normal','overweight','obese I','obese II', 'obese III'),
+                           ordered = TRUE) # ordinal
+levels(diabetes$BMI)
+
+
+
+table(diabetes$BMI)
+```
+
+Looks much better.
+
+
+
+The next MentHlth and PhysHlth are highly skewed:
+
+```{r}
+ggplot(diabetes,
+       aes(x = MentHlth)) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+
+
+ggplot(diabetes,
+       aes(x = PhysHlth)) +
+  geom_histogram(fill = "blue",
+                 bins = 100) +
+  theme_bw()
+
+```
+
+
+So it needs binning:
+
+```{r}
+
+diabetes$MentHlth <- 
+ ( ifelse(diabetes$MentHlth <= 10 , '3',  #good health
+       ifelse(diabetes$MentHlth <= 20 , '2',  #moderate health
+              '1'))) #poor health"
+
+
+          
+
+diabetes$MentHlth <- factor(diabetes$MentHlth,
+                           # levels from lowest to highest
+                           levels = c('1','2','3'),
+                           ordered = TRUE) # ordinal
+levels(diabetes$MentHlth)
+
+
+table(diabetes$MentHlth)   
+
+
+
+diabetes$PhysHlth <- 
+  (ifelse(diabetes$PhysHlth <= 10 , '3',  #good health
+       ifelse(diabetes$PhysHlth <= 20 , '2',  #moderate health
+              '1'))) #poor health"
+
+
+
+diabetes$PhysHlth <- factor(diabetes$PhysHlth,
+                           # levels from lowest to highest
+                           levels = c('1','2','3'),
+                           ordered = TRUE) # ordinal
+levels(diabetes$PhysHlth)
+
+table(diabetes$PhysHlth)   
+
+
+```
+
+
+Checking whether all variables are in an appropriate form:
+
+
+```{r}
+summary(diabetes)
+glimpse(diabetes)
+
+```
+
+
+Done.
+
+
+
+### Training models
+
+```{r}
+set.seed(987654321)
+which_train <- createDataPartition(y = diabetes$Outcome,
+                                   p = 0.7,
+                                   list = FALSE)
+
+diabetes_train <- diabetes[which_train,]
+diabetes_test <- diabetes[-which_train,]
+
+```
+
+
+
+
+### LASSO classification
+
+The regularization techniques used to address over-fitting and feature selection in a model with lot of independent variables are lasso and ridge. Ridge regression adds “squared magnitude” of coefficient as penalty term to the loss function, whereas Lasso Regression  adds “absolute value of magnitude” of coefficient. 
+The key difference between these techniques is that lasso shrinks the less important feature’s coefficient to zero i.e. removing it. 
+
+Elastic Net, a convex combination of Ridge and Lasso. Elastic Net first emerged as a result of critique on lasso, whose variable selection can be too dependent on data and thus unstable. The solution is to combine the penalties of ridge regression and lasso to get the best of both worlds.
+
+!!!All three methods were performed and gave almost same outcomes for test subset, therefore only elastic  net will be presented.
+
+The only hyperparameter used here is lambda. When lambda is zero then you can imagine we get back OLS. However, if lambda is very large then it will add too much weight and it will lead to under-fitting. To help choose this parameter, cross-validation is used.
+
+
+
+```{r}
+# 
+lambdas <- exp(log(10)*seq(-10, -1, length.out = 40))
+parameters_ridge <- expand.grid(alpha = seq(0, 1, 0.2),  #from lasso to ridge
+                                  lambda = lambdas)
+
+lambdas
+
+```
+
+```{r}
+
+ctrl_cv10 <- trainControl(method = "cv",
+                         number = 10)
+
+
+set.seed(123456789)
+diabetes_elastic <- train(Outcome ~ .,
+                      data = diabetes_train,
+                      method = "glmnet",
+                      tuneGrid = parameters_ridge,
+                      trControl = ctrl_cv10,
+          importance = TRUE)
+
+diabetes_elastic
+
+plot(diabetes_elastic)
+
+
+```
+Let's check variable importance:
+
+```{r}
+var_diabetes_elastic <- varImp(diabetes_elastic)
+
+plot(var_diabetes_elastic, top = 10)
+
+```
+
+Cholesterol check, general health , BMI as the most important variables.
+
+
+Saving prediction for both subsets:
+
+
+```{r}
+
+forecast_elastic_train <-  predict(diabetes_elastic, diabetes_train, type = "prob")
+forecast_elastic_test <-  predict(diabetes_elastic, diabetes_test, type = "prob")
+
+
+```
+
+
+
+## Neural net
+
+
+
+
+```{r}
+variables <- names(diabetes_train)
+model.formula <- as.formula(paste("Outcome ~", 
+                                  paste(variables[!variables %in% "Outcome"], 
+                                        collapse = " + ")))
+model.formula
+```
+
+Neuralnet package requires that the numerical data is collected as data.frame or matrix:
+
+
+```{r}
+
+diabetes.train.mtx <- 
+  model.matrix(  diabetes_train,
+                 object = model.formula)
+
+
+dim(diabetes.train.mtx)
+
+colnames(diabetes.train.mtx)
+```
+
+
+
+```{r}
+
+
+colnames(diabetes.train.mtx) <- gsub(" ", "_",  colnames(diabetes.train.mtx))
+colnames(diabetes.train.mtx) <- gsub(",", "_",  colnames(diabetes.train.mtx))
+colnames(diabetes.train.mtx) <- gsub("/", "",   colnames(diabetes.train.mtx))
+colnames(diabetes.train.mtx) <- gsub("-", "_",  colnames(diabetes.train.mtx))
+colnames(diabetes.train.mtx) <- gsub("'", "",   colnames(diabetes.train.mtx))
+colnames(diabetes.train.mtx) <- gsub("\\+", "", colnames(diabetes.train.mtx))
+colnames(diabetes.train.mtx) <- gsub("\\^", "", colnames(diabetes.train.mtx))
+colnames(diabetes.train.mtx)
+
+
+col_list <- paste(c(colnames(diabetes.train.mtx[, -1])), collapse = "+")
+col_list <- paste(c("Outcome ~ ", col_list), collapse = "")
+(model.formula2 <- formula(col_list))
+
+```
+
+
+As it was hinted during labs, the number of hidden layers will be set to 2/3 of the input layers: taking all levels of the variables in my train dataset, i.e. 42, the number of neurons will be 28.
+The default algorithm will be used - Resilient Backpropogation (rprop+)
+
+```{r}
+diabetes.nn <-  data.frame(diabetes.train.mtx,
+                           Outcome = as.numeric(diabetes_train$Outcome == 1)) %>%
+  neuralnet(model.formula2,
+            data = .,
+            hidden = c(28), 
+            linear.output = FALSE, 
+            learningrate.limit = NULL,
+            learningrate.factor = list(minus = 0.5, plus = 1.2),
+            algorithm = "rprop+",
+            threshold = 0.01) 
+
+
+```
+
+```{r}
+plot(diabetes.nn, rep = "best")
+```
+
+
+Test subset must be also converted into a matrix:
+
+```{r}
+
+diabetes.test.mtx <- 
+  model.matrix(  diabetes_test,
+                 object = model.formula)
+
+
+colnames(diabetes.test.mtx) <- gsub(" ", "_",  colnames(diabetes.test.mtx))
+colnames(diabetes.test.mtx) <- gsub(",", "_",  colnames(diabetes.test.mtx))
+colnames(diabetes.test.mtx) <- gsub("/", "",   colnames(diabetes.test.mtx))
+colnames(diabetes.test.mtx) <- gsub("-", "_",  colnames(diabetes.test.mtx))
+colnames(diabetes.test.mtx) <- gsub("'", "",   colnames(diabetes.test.mtx))
+colnames(diabetes.test.mtx) <- gsub("\\+", "", colnames(diabetes.test.mtx))
+colnames(diabetes.test.mtx) <- gsub("\\^", "", colnames(diabetes.test.mtx))
+colnames(diabetes.test.mtx)
+
+```
+
+Checking prediction accuracy with compute() function:
+
+```{r}
+diabetes.pred.nn <- compute(diabetes.nn, diabetes.test.mtx[, -1])
+
+```
+
+
+
+## Classification tree
+
+
+
+For some reason the program did not accept 1/0 as levels of the dependent variable for tree based models. Therefore I had to change the notation to YES/NO.
+
+```{r}
+
+
+diabetes_train$Outcome <- ifelse(diabetes_train$Outcome == 1, "Yes", "No")
+diabetes_train$Outcome <- as.factor(diabetes_train$Outcome)
+
+
+diabetes_test$Outcome <- ifelse(diabetes_test$Outcome == 1, "Yes", "No")
+diabetes_test$Outcome <- as.factor(diabetes_test$Outcome)
+
+```
+
+
+As it was already mentioned in regression project, the advantage of decision tree its non-sensitiveness to outliers and easiness to interpret and visualize.
+
+
+To use simple classification tree firstly,  I will let  the tree grow very big. Then using cross-validation process performed within rpart function, we will obtain an optimal value of parameter cp - complexity cost function.
+
+
+```{r}
+library(rpart)
+library(rpart.plot)
+library(rattle)
+diabetes_tree <- 
+  rpart(model.formula,
+        data = diabetes_train,
+        method = "class",
+        minsplit = 84, # ~ 2% of the training set
+        minbucket = 42, # ~ 1% of the training set
+        maxdepth = 30, # default
+        cp = -1)
+fancyRpartPlot(diabetes_tree)
+```
+
+```{r}
+printcp(diabetes_tree)
+```
+The model has a vital feature to select more important variables. As we may see, out of all 21 predictors, 14 were used.
+
+Now I will build a model once again using optimal value of cp parameter.
+
+
+```{r}
+opt <- which.min(diabetes_tree$cptable[, "xerror"])
+cp <- diabetes_tree$cptable[opt, "CP"]
+
+diabetes_tree_OPT <- 
+  prune(diabetes_tree, cp = cp)
+fancyRpartPlot(diabetes_tree_OPT)
+```
+
+
+
+
+```{r}
+forecast_tree_train <-  as.data.frame(predict(diabetes_tree_OPT, diabetes_train, type = "prob"))
+forecast_tree_test <-  as.data.frame(predict(diabetes_tree_OPT, diabetes_test, type = "prob"))
+
+```
+
+
+
+
+
+
+## Random forest
+
+Random forests help to reduce tree correlation by introducing more randomness into the tree-growing process. More specifically, for every single decision tree from the forest, the trained data is bootstrapped from the original training dataset. As it was proved during labs, in a process of bootstrapping the sample, ca. 30% of the dataset is rejected. This 30% of data may be used then to prove the quality of the model, i.e out-of-bag error (“oob”)
+
+Moreover for every single regression tree not all independent variables are used, but its subset. The number of chosen variables must be found using cross-validation. In my model I will try to check number of independent variables between 4 and 15. Using train() ficntion to build the model we can also tune minimum node size.
+
+```{r}
+
+set.seed(123456)
+parameters_ranger <- 
+  expand.grid(mtry = 4:15,
+              splitrule = c("gini"),
+              min.node.size = c(20, 50, 70, 90))
+
+ctrl_cv10 <- trainControl(method = "cv", 
+                         number =    10,
+                         classProbs = T)
+
+
+ diabetes.rf <- 
+    train(Outcome ~. , 
+          data = diabetes_train, 
+          method = "ranger", 
+          num.trees = 500, 
+          num.threads = 3, 
+          importance = "impurity",
+          tuneGrid = parameters_ranger, 
+          trControl = ctrl_cv10)
+ 
+ 
+  diabetes.rf
+
+```
+Plotting changes if accuracy with resepect to variables change:
+
+```{r}
+plot(diabetes.rf)
+
+```
+
+```{r}
+(tree1.importance <- varImp(diabetes.rf))
+plot(tree1.importance, top = 15)
+
+```
+
+General health, high blood and cholesterol are the most important variables.
+
+
+Saving predictions...:
+
+```{r}
+forecast_rf_train <-  predict(diabetes.rf, diabetes_train, type = "prob")
+forecast_rf_test <-  predict(diabetes.rf, diabetes_test, type = "prob")
+
+```
+ 
+ 
+# Conclusion - comparing quality measures using ROC/AUC
+
+
+
+```{r}
+library(pROC)
+
+
+colnames(forecast_elastic_train)  <- c("No", "Yes")
+
+ROC.elastic_train <- roc(as.numeric(diabetes_train$Outcome), 
+                       as.numeric(forecast_elastic_train$Yes))
+
+colnames(forecast_elastic_test)  <- c("No", "Yes")
+
+ROC.elastic_test <- roc(as.numeric(diabetes_test$Outcome), 
+                       as.numeric(forecast_elastic_test$Yes))
+
+
+ROC.tree_train <- roc(as.numeric(diabetes_train$Outcome), 
+                       as.numeric(forecast_tree_train$Yes))
+
+ROC.tree_test <- roc(as.numeric(diabetes_test$Outcome), 
+                       as.numeric(forecast_tree_test$Yes))
+
+
+ROC.rf_train <- roc(as.numeric(diabetes_train$Outcome), 
+                       as.numeric(forecast_rf_train$Yes))
+
+ROC.rf_test <- roc(as.numeric(diabetes_test$Outcome), 
+                       as.numeric(forecast_rf_test$Yes))
+
+ROC.nn_test <- roc(as.numeric(diabetes_test$Outcome), 
+                       as.numeric(diabetes.pred.nn$net.result))
+
+```
+
+
+
+
+```{r}
+list(
+  ROC.elastic_train = ROC.elastic_train,
+  ROC.elastic_test = ROC.elastic_test,
+  ROC.tree_train = ROC.tree_train,
+  ROC.tree_test  = ROC.tree_test,
+  ROC.rf_train = ROC.rf_train,
+  ROC.rf_test = ROC.rf_test,
+  ROC.nn_test = ROC.nn_test
+) %>%
+  pROC::ggroc(alpha = 0.5, linetype = 1, size = 1) + 
+  geom_segment(aes(x = 1, xend = 0, y = 0, yend = 1), 
+               color = "grey", 
+               linetype = "dashed")   +
+  theme_bw() + coord_fixed() +
+  scale_color_brewer(palette = "Paired")
+
+
+```
+
+```{r}
+auc(ROC.elastic_train) 
+auc(ROC.elastic_test)  
+auc(ROC.tree_train)  
+auc(ROC.tree_test)  
+auc(ROC.rf_train) 
+auc(ROC.rf_test) 
+auc(ROC.nn_test)
+```
+
+The best predictions on testing dataset performed random forest method. BUT one has take into account, that model may be overfitted - the performance o train dataset is significantly better. It is also the case with elastic net, which performed on testing dataset very similarly.
+
+
+The worst one performed neural network. This is because the number of hidden layers and neurons was chosen solely based on rules of thumb without any cross validation.
+
+
+
+
+References: 
+
+Source of the dataset:
+https://www.kaggle.com/alexteboul/diabetes-health-indicators-dataset?select=diabetes_binary_health_indicators_BRFSS2015.csv
+
+https://towardsdatascience.com/l1-and-l2-regularization-methods-ce25e7fc831c
