@@ -1,0 +1,623 @@
+---
+title: "HW4 Edyta Pszczółkowska"
+author: "Edyta Pszczółkowska 435022"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+
+
+```{r}
+
+```
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+rm(list=ls())
+data <- readRDS("me.hedonic.rds")
+
+```
+
+# Introduction
+
+The aim of this project is to assess if and how the environmental issues, in this particular case organic nitrogen applied to fields and arable land expressed in percentage terms, affect housing prices and to what extent such issues matter by finding willingness to pay for better environmental conditions of surroundings. 
+
+In order to do so, hedonic regression will be applied which is  a regression model estimating the influence that various factors have on the price of a good. 
+
+
+
+
+The dataset, which will be used is the set of 2092 records representing houses in Bretanny, in the north - west of France. The model will be explained with 10 explanatory variable and a dependent variable which is the price of house [EUR]. Two of them are especially important:
+
+-  the proportion of permanent grassland converted into cultivated grassland
+- livestock nitrogen emissions per hectare of arable land in rural districts where the residential houses are located
+
+Why they are important? 
+Agriculture in this region has two main impacts on the environment.
+- Firstly, the activities of intensive livestock units lead to harmful effects on the environment in  various forms, such as the production of unpleasant odors and the release/emission of nitrates that pollute the soil, affect water quality and seep into the groundwater. 
+- Secondly, effect of agriculture on the environment concerns the degradation of the rural landscape resulting from intensive agricultural practices and activities.
+
+
+
+
+
+# Basic explanatory data analysis
+
+## Choosing form of the dependent variable
+
+
+
+Let's see which form of the dependent variable - log or basic one - is closer to be normally distributed
+
+Logarithmic form:
+
+```{r}
+hist(data$logprice)
+
+library(ggpubr)
+ggqqplot(data$logprice)
+```
+
+
+basic form:
+
+```{r}
+
+hist(exp(data$logprice))
+ggqqplot(exp(data$logprice))
+```
+
+Hard to asses after plotting.
+
+
+Let's use Shapiro-Wilk and Jarque-Bera normality test 
+H0: we fail to reject the null hypothesis, that the variable is normally distributed.
+H1: we reject the null hypothesis in favour of H1 - the variable is NOT normally distributed.
+
+
+```{r}
+shapiro.test(data$logprice)
+shapiro.test(exp(data$logprice))
+
+library(tseries)
+jarque.bera.test(data$logprice)
+jarque.bera.test(exp(data$logprice))
+
+```
+
+Both forms of the dependent variable are not normally distributed. So in my further analysis I  will stick to log form.
+
+
+##  Inspecting independent variables. {.tabset}
+
+### alltogehter 
+
+![*source:....*](Variables HW4.png)
+
+ 
+### age
+
+Inspecting age...:
+
+```{r}
+
+hist(data$age)
+
+```
+
+It seems to be really crazy. Let's check how many houses are older than 70 years:
+
+```{r}
+length(data$age[data$age > 80 ])
+```
+Although these record account for almost 20% of the whole dataset size, I will have to remove them, as they would introduce too much distortion, bye bye:
+
+
+```{r}
+data <- data[data$age < 80, ]
+```
+
+
+### repair
+
+```{r}
+table(data$repair)
+data$repair <- as.factor(data$repair)
+```
+75% of the houses are in a good condition.
+
+### rooms
+
+```{r}
+hist(data$rooms)
+```
+
+Nothing to add here.
+
+
+### lot
+
+```{r}
+hist(data$lot)
+```
+
+Let's see it's logarithmic form:
+
+
+
+
+```{r}
+hist(log(data$lot))
+```
+
+
+Much much better. I will stick to that form, let's remove the basic form and replace it with log one:
+
+```{r}
+data$loglot <- log(data$lot)
+data$lot <- NULL
+```
+
+
+
+### County
+
+County == 1, when  if ‘Ille et Vilaine’ , a posh district in the north - west of France.
+
+```{r}
+table(data$county)
+
+data$county <- as.factor(data$county)
+```
+
+### vacant
+
+
+Vacant houses in the surrounding expressed in percatege terms:
+
+```{r}
+hist(data$vacant)
+```
+
+### Population 
+
+```{r}
+hist(data$population)
+```
+
+
+Now we can see, that all houses in the dataset are placed in small towns where there is no more inhabitants than 5k.
+
+### Average income of the inhabitants:
+
+```{r}
+hist(data$avincome)
+```
+
+```{r}
+hist(log(data$avincome))
+```
+
+
+It is not improved much, therefore I will stick to basic form of this variable.
+
+## Environmental variables {.tabset}
+
+### farmland
+
+
+Next one is arable land/ temporary meadows expressed in percentage terms:
+
+```{r}
+hist(data$farmland)
+```
+
+Data not skewed, will be kept in this form.
+
+
+
+### nitrogen concentration 
+
+Unit - [kg/ha]
+
+```{r}
+hist(data$nitro)
+
+```
+
+Data highly skewed. 
+
+Let's check if all independent variables are in correct form:
+
+```{r}
+summary(data)
+```
+
+As there are 8 numeric variables, let's check their correlations.
+
+When predicting the cost of a house using  two  correlated predictors, it may be the case, that both are providing a lot of the same information and one of them would be redundant.
+
+
+```{r}
+
+houses_numeric_vars <- 
+  sapply(data, is.numeric) %>% 
+  which() %>% 
+  names()
+
+
+houses_correlations <- 
+  cor(data[,houses_numeric_vars],
+      use = "pairwise.complete.obs")
+
+
+library(corrplot)
+corrplot(houses_correlations)
+
+```
+
+The directions of correlations of the dependent and independent variables (whether its negative or positive) and their strength is quite predictable, like:
+
+- the age and percentage of vacant houses in the neighborhood affect negatively the price, age affects it stronger
+- the number of rooms and average income of the inhabitants affect the price positively, number of rooms has stronger impact 
+
+Among pairwise correlations between independent variables only average income and vacant houses are negatively strong correlated. As I don't see any good explanation for this case, I assume that it can be just a coincidence or spurious regression and leave both of them.
+
+
+
+# Modelling part
+
+## OLS
+
+Let's run the first model with all independent variables in their basic forms:
+
+```{r}
+ols1 <- lm(logprice ~ ., data = data)
+summary(ols1)
+```
+As we can see, all the variables are significant when we consider them separately (all of them scored 3 stars [***], which means, that the result of the t-statistics has a p-value lower than 1%).
+
+
+All variables are also jointly significant - the result of F-test, whose null hypothesis indicates that all variables jointly are insignificant, has a p-value lower than 1%, so the first condition among all necessary ones is fulfilled.
+
+```{r}
+library(lmtest)
+resettest(ols1)
+```
+
+RESET test checks whether the model would be better,  if any variable were given in a polynomial form, i.e. whether simple linear model  is the best approximation of the real relationships between dependent and independent variables.
+
+H0: all coefficients standing next to polynomial forms of independent variables are jointly insignificant - simple linear model  is the best approximation of the real relationships between dependent and independent variables.
+
+
+If we reject null hypothesis, then the model suffers from misspecification, like in this case (p-value << 1%).
+
+
+Heteroscedascity of the residuals: 
+OLS assumption - the variance of the error term does not increase or decrease with any of the explanatory variables.
+
+```{r}
+bptest(ols1) 
+```
+
+
+
+P-value much lower than 1% : there is heteroscedascity in the model and therefore the Least Squares Method estimator is not effective- Gauss-Markov theorem is violated.
+
+
+Time for testing the normality of residuals using Jarque-Bera test (H0: residuals normally distributed):
+
+```{r}
+library(tseries)
+jarque.bera.test(ols1$residuals)
+```
+
+
+P-value << 1% , we reject the null hypothesis that the residuals are normally distributed.
+
+
+As the model already didn't pass almost any of crucial test, I will try some other one.
+Let's now play by adding the square and cubic forms of all numerical variables and use all of them in the model (this is crazy, I know) :
+
+
+
+
+
+```{r}
+data$age_squared <- data$age * data$age
+data$rooms_squared <-  data$rooms * data$rooms
+data$vacant_squared <- data$vacant * data$vacant
+data$population_squared <- data$population* data$population
+data$avincome_squared <- data$avincome* data$avincome
+data$farmland_squared <- data$farmland * data$farmland
+data$loglot_squared <- data$loglot * data$loglot
+data$nitro_squared <- data$nitro  *  data$nitro
+
+
+data$age_cubic <- data$age * data$age * data$age
+data$rooms_cubic <-  data$rooms * data$rooms * data$rooms
+data$vacant_cubic <- data$vacant * data$vacant * data$vacant
+data$population_cubic <- data$population* data$population * data$population
+data$avincome_cubic <- data$avincome* data$avincome * data$avincome
+data$farmland_cubic <- data$farmland * data$farmland * data$farmland
+data$loglot_cubic <- data$loglot  * data$loglot * data$loglot
+data$nitro_cubic <- data$nitro  *  data$nitro *  data$nitro
+
+
+variables <- names(data)
+variables
+
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" )], 
+                                        collapse = " + ")))
+model_formula
+
+ols2 <- lm(model_formula, data = data)
+summary(ols2)
+resettest(ols2)
+bptest(ols2) 
+jarque.bera.test(ols2$residuals)
+```
+
+RESET test improved significantly, which means that adding polynomial forms of variables is a good solution.
+R2 and adjusted R2 also improved, other test didn't change.
+Now there are some redundant variables, i.e insignificant ones.
+To find an optimal solution I will apply GETS approach- general to specific. I will iteratively exclude the variables with highest p-value and repeat this step until  all variables in the model are significant.
+
+
+So the first one which should be excluded is "nitro_cubic" variable:
+
+
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic")], 
+                                        collapse = " + ")))
+model_formula
+
+ols3 <- lm(model_formula, data = data)
+summary(ols3)
+```
+
+Next one is "rooms_squared":
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared")], 
+                                        collapse = " + ")))
+model_formula
+
+ols4 <- lm(model_formula, data = data)
+summary(ols4)
+```
+
+Next one to exclude is "age_squared":
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared")], 
+                                        collapse = " + ")))
+model_formula
+
+ols5 <- lm(model_formula, data = data)
+summary(ols5)
+```
+Now "farmland_squared" :
+
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared")], 
+                                        collapse = " + ")))
+model_formula
+
+ols5 <- lm(model_formula, data = data)
+summary(ols5)
+```
+
+
+loglot_cubic....
+
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared", "loglot_cubic")], 
+                                        collapse = " + ")))
+model_formula
+
+ols6 <- lm(model_formula, data = data)
+summary(ols6)
+```
+
+And the last one, "vacant_squared":
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared", "loglot_cubic", "vacant_squared")], 
+                                        collapse = " + ")))
+model_formula
+
+ols7 <- lm(model_formula, data = data)
+summary(ols7)
+```
+
+
+
+loglot_squared....
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared", "loglot_cubic", "vacant_squared", "loglot_squared")], 
+                                        collapse = " + ")))
+model_formula
+
+ols8 <- lm(model_formula, data = data)
+summary(ols8)
+```
+
+population...
+
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared", "loglot_cubic", "vacant_squared", "loglot_squared", "population")], 
+                                        collapse = " + ")))
+model_formula
+
+ols8 <- lm(model_formula, data = data)
+summary(ols8)
+```
+
+population_cubic...
+
+
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared", "loglot_cubic", "vacant_squared", "loglot_squared", "population", "population_cubic")], 
+                                        collapse = " + ")))
+model_formula
+
+ols9 <- lm(model_formula, data = data)
+summary(ols9)
+```
+
+nitro_squared...
+
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared", "loglot_cubic", "vacant_squared", "loglot_squared", "population", "population_cubic", "nitro_squared")], 
+                                        collapse = " + ")))
+model_formula
+
+ols10 <- lm(model_formula, data = data)
+summary(ols10)
+```
+
+farmland_cubic...
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared", "loglot_cubic", "vacant_squared", "loglot_squared", "population", "population_cubic", "nitro_squared", "farmland_cubic")], 
+                                        collapse = " + ")))
+model_formula
+
+ols11 <- lm(model_formula, data = data)
+summary(ols11)
+```
+
+
+age_cubic...
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared", "loglot_cubic", "vacant_squared", "loglot_squared", "population", "population_cubic", "nitro_squared", "farmland_cubic", "age_cubic")], 
+                                        collapse = " + ")))
+model_formula
+
+ols12 <- lm(model_formula, data = data)
+summary(ols12)
+```
+
+Vacant...
+
+```{r}
+model_formula <- as.formula(paste("logprice ~", 
+                                  paste(variables[!variables %in% c("logprice" , "nitro_cubic", "rooms_squared", "age_squared", "farmland_squared", "loglot_cubic", "vacant_squared", "loglot_squared", "population", "population_cubic", "nitro_squared", "farmland_cubic", "age_cubic", "vacant")], 
+                                        collapse = " + ")))
+model_formula
+
+ols13 <- lm(model_formula, data = data)
+summary(ols13)
+```
+
+As the significance of all variables was the condition to stop the iteration, there are no redundant variables (only square average income is on the verge of typical 5% threshold).
+
+The F-statistics also indicates, that all variables jointly are significant.
+
+
+In comparison to OLS with initial data , the R-squared value improved by 0,0182, adjusted R-squared by 0,0178.
+
+
+```{r}
+resettest(ols13)
+bptest(ols13)
+jarque.bera.test(ols13$residuals)
+```
+
+
+
+
+RESET test- we reject the null hypothesis in favor of alternative hypothesis, that the model suffers from misspecification. Nevertheless we can see that the p-value is much much higher than in original ols1 model, so the specification improved significantly. 
+
+Both Jarque-Bera and Breusch-Pagan test  failed with unchanged p-values.
+
+## Interpretation of results {.tabset}
+
+### non-environmental variables
+
+Time  for interpretation of the coefficients, only those which are in their basic form, i.e. not squared or cubic ones:
+
+AGE (log-level): if the age if house increases by 1 year, the price of house decreases by 100% * -4.795e-03 
+
+REPAIR (binary variable): in comparison to base level (in this case house which is in a bad state), the price of the house increases by   100% * 3.074e-01 
+
+ROOMS (log-level): every additional room in the house increases its price by 100% * 2.301e-01 
+
+COUNTY (binary variable): in comparison to base level (in this case house which is NOT placed in ‘Ille et Vilaine’ district), the price of the house increases by   100% * 1.205e-01   
+
+
+AVINCOME  (log-level):   every additional unit of average income (in this case 1000 FRF) of the district's inhabitants increases its price by 100% * 3.703e-01           
+
+
+LOGLOT (log-log) : every additional percent of lot unit (in this case 1000 m2) increases the price of the house by 100% * 1.050e-01
+
+
+### Environmental variables
+
+Let's  now focus on the environmental variables included in the model:
+
+FARMLAND: (log-level): every additional percent of arable land unit (in this case %) decreases the price of the house by 3.301e-03* 100%. 
+
+When we think about welfare measures, this value may be interpreted in two ways:
+
+- compensating variation (CV): the value is a minimum willingness to accept, i.e. by how much does a potential buyer expect the price of house to be lower, to maintain the same level of utility, as if there was no additional unit of arable land.
+
+- equivalent variation (EV): this value is a maximum willingness to pay, i.e. how much would a potential buyer pay to prevent damage in the environment by one unit, in this case increase of arable area by one percent.
+
+
+
+
+NITRO: (log-level): every additional kilogram per hectare  of nitrogen concentration decreases the price of the house by 4.943e-04 * 100%. 
+
+When we think about welfare measures, this value may be interpreted in two ways:
+
+- compensating variation (CV): the value is a minimum willingness to accept, i.e. by  how much would a potential buyer expect the price of the house to be lower, to accept the fact, that the nitrogen concentration grew by one unit [kg/ha]  to maintain the same level of welfare as if there was no change in environment condition.
+
+- equivalent variation (EV): this value is a maximum willingness to pay, i.e. how much would a potential buyer additionally pay for the house, to prevent the growth of nitrogen concentration by one unit [kg/ha].
+
+
+
+
+# References
+
+
+SEMIPARAMETRIC HEDONIC PRICE MODELS: ASSESSINGTHE EFFECTS OF AGRICULTURAL NONPOINT SOURCEPOLLUTION - by CHRISTOPHE BONTEMPS, MICHEL SIMIONI AND YVES SURRY, Toulouse School of Economics, GREMAQ-INRA (Toulouse, France) Swedish University of Agricultural Sciences (Uppsala, Sweden)
+
+https://www.investopedia.com/terms/h/hedonicpricing.asp
+
+https://stats.stackexchange.com/questions/86269/what-is-the-effect-of-having-correlated-predictors-in-a-multiple-regression-mode
+
+https://statisticsbyjim.com/regression/ols-linear-regression-assumptions/
+
+https://www.acrwebsite.org/volumes/6348/volumes/v12/NA-
