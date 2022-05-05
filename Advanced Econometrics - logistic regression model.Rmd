@@ -1,0 +1,453 @@
+---
+title: "Applying logit model for predicting a stroke risk"
+author: "Edyta Pszczółkowska"
+date: "10 06 2021"
+output: html_document
+---
+
+```{r}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+```
+
+
+## Abstract
+
+The main aim of this project was to check which health and social-economic status data are significant in terms of predicting whether a given person is prone to suffering from  stroke. The analysis was performed on a dataset taken from Kaggle portal. The used method was to build logit model and to choose significant variables by applying general-to-specific (GETS) approach. After choosing statistically significant variables, quality tests were performed. The conclusions that could be drawn from this analysis were that some information that should be obviously included in the model are not significant (like whether a person suffers from heart disease or not). Such an analysis can be used in advanced research on cardiovascular illnesses or its prevention.
+
+
+## Introduction
+
+Cardiovascular disease (CVD) is a general term for conditions affecting the heart or blood vessels.
+It's usually associated with a build-up of fatty deposits inside the arteries (atherosclerosis) and an increased risk of blood clots. It is one of the most frequent cause of deaths in the whole European Union and other developed countries.
+One of the most frequent cases is stroke - which means that the blood supply to part of the brain is cut off, which can cause brain damage and possibly death.
+The goal of my work was to check which characteristics may rise the risk of suffering from stroke in the future.
+
+MY HYPOTHESIS which I wanted to prove is that the only significant traits that can be used in predicting stroke are those related directly to health and lifestyle. In case of my dataset these are: gender, age, whether person suffers from hypertension and heart diseases or not, glucose level and bmi index level. On the other hand those which I want to prove as insignificant are marital status, residence type or work type. My intuition about it is supported by  research on that matter and general knowledge about healthy life style. The risk factors of stroke are nicely summed up here: http://www.fum.info.pl/page/index/35 .
+
+
+## Data and its preparation
+
+The dataset was taken from Kaggle portal (https://www.kaggle.com/fedesoriano/stroke-prediction-dataset) and  consists of 12 following variables, all of them rather self-explanatory: 
+
+
+```{r}
+
+
+
+setwd("D:\\Edyta pliki\\DS\\II semestr\\AE")
+data <- read.csv("healthcare-dataset-stroke-data.csv")
+library(lmtest)
+colnames(data)
+```
+I will remove the "id" variable:
+```{r}
+data$id <- NULL
+```
+
+The variable of special interest is "stroke" variable - dichotomous  variable indicating whether a person suffered from a stroke or not. This will be the dependent variable in my model. 
+```{r}
+data$stroke <- as.factor(data$stroke)
+```
+
+Let's inspect all other variables one-by-one: 
+
+
+```{r}
+table(data$gender)
+
+
+
+
+```
+
+As there is only one person with "other" as gender, I will delete this record to make variable binary:
+```{r}
+data <- data[data$gender != "Other", ]
+data$gender <- as.factor(data$gender)
+```
+
+Variable age:
+
+```{r}
+summary(data$age)
+hist(data$age)
+table(data$age[data$stroke == 1])
+```
+
+
+This variable is very widely distributed.
+As we can see, in the dataset there were only two children who suffered from a stroke. 
+To make the model more plausible, I will delete those records, where age is less than 20.
+Also medical articles support my choice: https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3475622/
+
+
+
+```{r}
+data <- data[data$age > 20 ,]
+```
+
+I will convert the descritpion of "hypertension" and "heart_disease" variables from 0/1 notation to the more explanatory one and make sure that all remaining dichotomous variables are treated as factors.
+
+```{r}
+data$hypertension <- ifelse(data$hypertension == 1, "yes", "no")
+
+
+data$heart_disease <- ifelse(data$heart_disease == 1, "yes", "no")
+
+data$hypertension <- as.factor(data$hypertension)
+
+data$heart_disease <- as.factor(data$heart_disease)
+
+data$ever_married <- as.factor(data$ever_married)
+
+
+data$Residence_type <- as.factor(data$Residence_type)
+
+
+
+```
+
+Average glucose level is measured in [mg/dl] units. 
+The distribution of data:
+
+```{r}
+summary(data$avg_glucose_level)
+hist(data$avg_glucose_level)
+
+```
+
+
+To make analysis easier I will divide the variable into intervals according to their interpretation
+(source: https://diabetyk24.pl/blog-section/Badania-cukru-we-krwi)
+
+```{r}
+data$glucose <- ifelse(data$avg_glucose_level < 70, "hypoglycemia", ifelse(data$avg_glucose_level >= 70 & data$avg_glucose_level < 100 , "normal", ifelse(data$avg_glucose_level >= 100 & data$avg_glucose_level < 126, "pre-diabetes", "diabetes")  ))
+
+data$avg_glucose_level <- NULL
+table(data$glucose)
+data$glucose <- as.factor(data$glucose)
+```
+
+
+BMI index is counted as follows: BMI_index = weight[kg]/ height^2[m^2]
+The distribution of data:
+
+```{r}
+data$bmi <- as.numeric(data$bmi)
+
+summary(data$bmi)
+hist(data$bmi)
+
+```
+
+
+To make analysis easier I will divide variable into intervals according to their interpretation
+(source: https://www.cdc.gov/healthyweight/assessing/bmi/adult_bmi/index.html)
+To get rid of the problem of missing values, I will convert them into "unknown" category.
+
+```{r}
+
+
+
+data$bmi2 <- ifelse(data$bmi < 18.5, "underweight", ifelse(data$bmi >= 18.5 & data$bmi < 25 , "healthy weight", ifelse(data$bmi >= 25 & data$bmi < 30, "overweight", "obese")  ))
+
+
+table(data$bmi2)
+data$bmi2[is.na(data$bmi2)] <- 'unknown'
+data$bmi2 <- as.factor(data$bmi2)
+data$bmi <- NULL
+```
+
+A mysterious variable "work_type":
+
+```{r}
+table(data$work_type)
+data$work_type <- as.factor(data$work_type)
+```
+
+From my personal point of view, the categories are not informative enough to give any valuable information. Nevertheless I will take this variable into account in my further analysis.
+
+
+
+
+
+
+
+
+
+Last but not least - smoking status:
+
+```{r}
+table(data$smoking_status)
+data$smoking_status <- as.factor(data$smoking_status)
+```
+
+Let's take a look at the variables altogether:
+
+```{r}
+summary(data)
+```
+## Building logit model and applying GETS approach
+
+Firstly I will try to build a logit model. Once after applying GETS approach, I will choose only significant variables and then compare with appropriate measures logit and probit model.
+
+
+
+
+```{r}
+model1 <- glm(stroke ~ gender + age + hypertension  + heart_disease + ever_married  + work_type +  Residence_type +
+                glucose  + smoking_status + bmi2, data = data, family=binomial(link="logit"))
+summary(model1)
+```
+
+
+By applying GETS approach, in the next iterations we delete the least significant variables,
+in other words, the one with the highest p-value of coefficients. In our case "gender"  :
+
+
+```{r}
+model2 <- glm(stroke ~  age + hypertension  + heart_disease + ever_married  + work_type +  Residence_type +
+                glucose  + smoking_status + bmi2, data = data, family=binomial(link="logit"))
+
+lrtest(model1, model2)
+```
+
+The lrtest compares full  (model1) and nested models (model2). The null hypothesis of such a test is that all the rejected variables are jointly insignificant.
+P-value greater than 5%, we fail to reject null hypothesis , that variable "gender" is insignificant.
+ 
+
+```{r}
+summary(model2)
+```
+
+
+Let's get rid of "work_type" variable as all p-values of the coefficients next to its levels are all very high (just like my intuition told me):
+
+
+```{r}
+model3 <- glm(stroke ~  age + hypertension  + heart_disease + ever_married  +  Residence_type +
+                glucose  + smoking_status + bmi2, data = data, family=binomial(link="logit"))
+
+lrtest(model1, model3)
+```
+
+
+p-value greater than 5%, so we fail to reject null hypothesis , that variables "gender" and "work type" are jointly insignificant
+```{r}
+summary(model3)
+```
+
+Let's remove smoking status as all p-values of the coefficients next to its levels are all very high:
+
+
+
+```{r}
+model4 <- glm(stroke ~  age + hypertension  + heart_disease + ever_married  +  Residence_type +
+                glucose  +  bmi2, data = data, family=binomial(link="logit"))
+
+lrtest(model1, model4)
+```
+
+p-value greater than 5%, so we fail to reject null hypothesis , that variables "gender" "smoking status" and "work type" are jointly insignificant
+
+```{r}
+summary(model4)
+```
+
+
+
+Let's remove "Residence_type" variable
+
+```{r}
+model5 <- glm(stroke ~  age + hypertension  + heart_disease + ever_married  +  
+                glucose  +  bmi2, data = data, family=binomial(link="logit"))
+
+lrtest(model1, model5)
+```
+
+p-value greater than 5%, we fail to reject null hypothesis, that variables "Residence_type",  "smoking status", "work type"  and "gender" are jointly insignificant
+
+```{r}
+summary(model5)
+```
+
+Let's relevel "bmi2" variable: the insignificant levels ("underweight", "overweight" ," obese") and the base level ("healthy weight") will be described as one base level and the only significant level ("unknown") will remain without changes:
+
+```{r}
+levels(data$bmi2)[levels(data$bmi2)=="obese"] = "base level"
+levels(data$bmi2)[levels(data$bmi2)=="healthy weight"] = "base level"
+levels(data$bmi2)[levels(data$bmi2)=="overweight"] = "base level"
+levels(data$bmi2)[levels(data$bmi2)=="underweight"] = "base level"
+```
+
+Let's create now again the same model, but with releveled "bmi2" variable
+
+```{r}
+
+model5 <- glm(stroke ~  age + hypertension  + heart_disease + ever_married  +  
+                glucose  +  bmi2, data = data, family=binomial(link="logit"))
+
+summary(model5)
+```
+
+Let's remove "ever married" variable:
+```{r}
+
+model6 <- glm(stroke ~  age + hypertension  + heart_disease +  
+                glucose  +  bmi2, data = data, family=binomial(link="logit"))
+
+lrtest(model1, model6)
+```
+
+ p-value greater than 5%, we fail to reject null hypothesis , that variables "Residence_type", "smoking status", "ever married", "work type"  and "gender" are jointly insignificant
+
+```{r}
+summary(model6)
+```
+
+
+ we should remove "heart_disease" variable in the next step: 
+
+
+```{r}
+model7 <- glm(stroke ~  age + hypertension  +  
+                glucose  +  bmi2, data = data, family=binomial(link="logit"))
+
+lrtest(model1, model7)
+
+```
+
+
+
+p-value greater than 5%, we fail to reject null hypothesis , that variables "Residence_type", "smoking status", "ever married", "heart_disease" , work_type" and "gender" are jointly insignificant
+```{r}
+summary(model7)
+```
+
+ONLY SIGNIFICANT VARIABLES LEFT
+
+
+## Interpretation of coefficients:
+
+
+In such a model we can interpret only a sign of the coefficient standing next to the variables.
+Variable "age": with every additional year the probability of having a stroke is growing.
+variable "hypertension": in comparison to people who don't suffer from hypertension (base level), the probability of having a stroke is growing.
+Variable "glucose": in comparison to base level which is "diabetes", the risk of suffering from stroke is decreasing for all other levels.
+Variable "bmi": in comparison to base level categories (underweight, healthy weight, overweight, obese) the probability of having a stroke for patients with unknown bmi is also growing.
+
+
+## Logit or probit - comparison
+
+Let's compare now which model - logit or probit is better one for the analysis. Not to repeat the code and bore my readers I performed the GETS procedure for probit model in another script. The choice of significant variables is exactly the same:
+```{r}
+model_probit <- glm(stroke ~  age + hypertension  +  
+                glucose   + bmi2, data = data, family=binomial(link="probit"))
+
+
+summary(model_probit)
+```
+
+Let's compare now our models to check which one is better:
+
+```{r}
+library(DescTools)
+PseudoR2(model7, "all") 
+PseudoR2(model_probit, "all")
+```
+
+
+According to AIC and BIC the logit one is slightly better, but looking at McFadden R-squared statistic the better 
+one would be probit model. In my further analysis I will keep using logit model.
+
+
+We cannot interpret the other pseudo R-squares as in the case of ordinary least square models, they are rather used to compare models between them, like I used the McFadden statistics.
+BUT (!) an interesting information gives us a "TJUR" R-squared value: it measures an average difference of probability of success (i.e. suffering from a stroke)
+between patients who had a stroke and those who didn't, in this case around 10%.
+Also an informative statistic for us is "McKelveyZavoina" R2 value. The interpretation of this value is similar to the one we know from the OLS model.
+So in the case of my model that would mean that around 35% of the variation of dependent variable is explained by the independent variable.
+
+## MARGINAL EFFECTS FOR MEAN VALUES
+```{r}
+library(mfx)
+
+logitmfx(stroke ~  age + hypertension  +   glucose   + bmi2, data = data, atmean = TRUE)
+```
+
+
+
+Interpretation: for a person characterized with average values of all 4 variables in the model additional year of life (variable "age")  increases the probability of having a stroke by only  0,2 percentage points.
+For variable "hypertension" the change from base level (NO hypertension) to  suffering from hypertension rises the probability of stroke by 1,07 percentage points.
+For variable "bmi2" change from base levels (underweight, normal weight, overweight, obese) to "unknown" category rises probability of stroke by 6,9 percentage points.
+For variable "glucose" change from "diabetes" which is base level to "hypoglicemia", "normal" or " pre-diabetes" decreases the probability of stroke by 1.5 , 1,6 and 1,1 percentage points respectively.
+
+
+
+## QUALITY TEST -  Linktest
+```{r}
+
+source("linktest.R")
+linktest_result = linktest(model7)
+```
+
+
+
+The desired result of this test is a significant yhat coefficient and the insignificant yhat2 coefficient (like in this case) 
+This means that my model doesn't have any missing variables, in other words, the specification of the model is correct.
+
+## GOODNESS OF FIT TEST  
+The Hosmer-Lemeshow  test is statistical test for goodness of fit for logistic regression models. 
+null hypothesis: the form of the model is appropriate.
+
+
+```{r}
+library(ResourceSelection)
+hoslem.test(model7$y, fitted(model7))
+```
+
+p-value is very high, so the form of the model is appropriate. But in case of this test large p-values don't necessarily mean that model is of a good fit, just that there isn't enough 
+evidence to say it's of a poor fit. Many situations can cause large p-values in HL test. Low power is one of the reasons this test has been highly criticized.
+
+
+## ROC , AUC
+
+
+```{r}
+library(pROC)
+
+roc(model6$y, fitted(model6), plot = TRUE, auc = TRUE)
+
+```
+
+
+The higher area under curve (AUC) value the better. The best (and theoretical in the same time) value is 1,
+meaning that model is perfectly able to distinguish between positive and negative stroke cases.
+The worst  scenario is AUC equal to 0,5, meaning that the model has no predictive power.
+In case of my model the result 0,823 is good enough.
+
+
+## Results
+
+Some of the findings while carrying out this analysis were quite surprising. One of the risk factors of stroke is being a male and smoking regularly. Not to mention heart disease of course. Also living in rural area (which turned out to be insignificant as well) can be beneficial for health as it is decreasing stress level.
+On the other hand some social-economic data I included in the model were to general to be informative enough, like already mentioned work type (with only 3 levels) or the variable with marital status (one doesn't have to be married to be in a satisfying relationship and the other way round). But in general, all performed quality tests proved that my model has appropriate form, so it is reliable enough for prediction purposes.
+
+## Conclusions
+
+
+Building such a model is a good example how modern statistic tools such as R package and advanced econometrics can support deep research on various health topics, which especially in the age of COVID pandemic (and possible forthcoming its mutations and new viruses) is gaining on its importance. I strongly believe, that with development of IT tools, statistical/econometric models and rich choice of data to analyse, in the forthcoming years we can witness breakthrough discoveries in this field. This is undoubtedly positive aspect of big data and its impact on human lives.
+
+
+## Bibliography
+ 
+ 
+http://www.fum.info.pl/
+https://www.ncbi.nlm.nih.gov/
+https://diabetyk24.pl
+https://www.cdc.gov/
+https://thestatsgeek.com/
+https://www.statisticshowto.com/
+https://www.rdocumentation.org/
+https://towardsdatascience.com/
+https://www.kaggle.com/datasets
+https://pl.wikipedia.org/
+https://rviews.rstudio.com/
